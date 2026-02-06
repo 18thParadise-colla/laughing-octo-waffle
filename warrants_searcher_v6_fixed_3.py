@@ -347,7 +347,7 @@ class INGOptionsFinder:
             "PG": ["Procter-Gamble"],
             "KO": ["Coca-Cola"],
             "MO": ["Altria-Group"],
-            "PM": ["Philip-Morris-International"],
+            "PM": ["PHILIP-MORRIS-INTERNATIONAL-INC", "Philip-Morris-International"],
             "WMT": ["Walmart"],
             "PEP": ["PepsiCo"],
             
