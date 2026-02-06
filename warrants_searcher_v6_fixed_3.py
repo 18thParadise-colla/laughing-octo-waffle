@@ -595,6 +595,49 @@ class INGOptionsFinder:
         
         best = max(col_scores.items(), key=lambda x: x[1])[0]
         return best
+
+    def _column_looks_like_underlying(self, rows: List, col_index: int) -> bool:
+        """Prüfe, ob eine Spalte tatsächlich wie ein Basiswert-Name aussieht."""
+        if col_index is None:
+            return False
+        sample = rows[1: min(12, len(rows))]
+        if not sample:
+            return False
+
+        text_hits = 0
+        numeric_hits = 0
+        total = 0
+
+        for row in sample:
+            cells = row.find_all('td')
+            if col_index >= len(cells):
+                continue
+            txt = cells[col_index].get_text(strip=True)
+            if not txt:
+                continue
+            total += 1
+            txt_lower = txt.lower()
+
+            has_letters = bool(re.search(r'[A-Za-zÄÖÜäöüß]', txt))
+            has_digits = bool(re.search(r'\d', txt))
+            looks_like_currency = bool(re.search(r'(usd|eur|€|\$)', txt_lower))
+            looks_like_date = bool(re.search(r'\d{1,2}\.\d{1,2}\.\d{2,4}', txt))
+
+            if has_digits and (looks_like_currency or looks_like_date):
+                numeric_hits += 1
+                continue
+            if has_digits and not has_letters:
+                numeric_hits += 1
+                continue
+            if has_letters:
+                text_hits += 1
+
+        if total == 0:
+            return False
+
+        text_ratio = text_hits / total
+        numeric_ratio = numeric_hits / total
+        return text_ratio >= 0.3 and text_hits >= numeric_hits
     
     def build_search_url_variants(self, underlying: str, option_type: str, 
                                    strike_min: float, strike_max: float) -> List[str]:
@@ -629,6 +672,7 @@ class INGOptionsFinder:
         """Scrape Optionsscheine von onvista mit Retry-Logik und Basiswert-Validierung"""
         options = []
         found_underlyings = set()  # Track was tatsächlich gefunden wurde
+        underlying_col = None
         
         try:
             response = self.session.get(url, timeout=15)
@@ -657,6 +701,10 @@ class INGOptionsFinder:
 
             # Bestimme heuristisch, welche Spalte den Basiswert-Namen enthält
             underlying_col = self._detect_underlying_column(rows, expected=expected_underlying)
+            if expected_underlying and not self._column_looks_like_underlying(rows, underlying_col):
+                if debug:
+                    print("      ⚠️ Basiswert-Spalte wirkt numerisch — Validierung wird übersprungen")
+                underlying_col = None
 
             if debug:
                 print(f"      🎯 Detected underlying column: {underlying_col}")
@@ -667,21 +715,23 @@ class INGOptionsFinder:
                 if len(cells) < 8:
                     continue
 
-                # VALIDIERUNG: extrahiere Basiswert aus detektierter Spalte
-                actual_underlying = self.extract_underlying_from_cells(cells, col_index=underlying_col)
-                found_underlyings.add(actual_underlying)
+                # VALIDIERUNG: extrahiere Basiswert aus detektierter Spalte (falls vorhanden)
+                actual_underlying = None
+                if underlying_col is not None:
+                    actual_underlying = self.extract_underlying_from_cells(cells, col_index=underlying_col)
+                    found_underlyings.add(actual_underlying)
 
                 if debug and idx == 1:  # Erste Datenzeile
                     print(f"\n      🔍 DEBUG - Spalten-Mapping (erste Datenzeile): detected_col={underlying_col}")
                     print(f"      {'─'*74}")
                     for i, cell in enumerate(cells[:15]):
                         cell_text = cell.get_text(strip=True)[:50]
-                        flag = '<--' if i == underlying_col else ''
+                        flag = '<--' if underlying_col is not None and i == underlying_col else ''
                         print(f"      [{i:2d}] {cell_text:<50} {flag}")
                     print(f"      {'─'*74}\n")
 
                 # Basiswert-Validierung (nur wenn expected_underlying gesetzt)
-                if expected_underlying and not self.validate_underlying(actual_underlying, expected_underlying):
+                if expected_underlying and underlying_col is not None and not self.validate_underlying(actual_underlying, expected_underlying):
                     if debug and idx < 5:  # Nur erste paar Fehler zeigen
                         print(f"      ⚠️ Zeile {idx}: FALSCHER BASISWERT '{actual_underlying}' (erwartet '{expected_underlying}')")
                     continue  # Skip diese Zeile
@@ -700,9 +750,12 @@ class INGOptionsFinder:
                     continue
             
             # WARNUNG: Falls gefundene Underlyings nicht passen
-            if expected_underlying and found_underlyings:
+            if expected_underlying:
                 # Use string-based matching to avoid creating fake cell objects
                 matching = any(self._matches_expected_string(expected_underlying, u) for u in found_underlyings)
+
+                if underlying_col is None:
+                    matching = False
 
                 # If no direct match found in the table, try a lightweight product-page confirmation
                 if not matching:
@@ -733,14 +786,16 @@ class INGOptionsFinder:
                         except Exception:
                             continue
 
-                    if not confirmed:
+                    if not confirmed and found_underlyings:
                         print(f"\n      ⚠️ WARNUNG: Suche nach '{expected_underlying}'")
                         print(f"      ABER Tabelle enthält: {', '.join(list(found_underlyings)[:5])}")
                         print(f"      → {len(options)} Optionsscheine werden IGNORIERT (falsche Underlyings)\n")
                         return []  # Keine falschen Warrants zurückgeben!
-                    else:
+                    if confirmed:
                         # confirmed via product page — proceed but log it
                         print(f"\n      ✅ Produkt-Seiten bestätigen Ergebnisse für '{expected_underlying}' — parsing trotz fehlender Spalte")
+                    elif underlying_col is None and not found_underlyings:
+                        print(f"\n      ⚠️ Basiswert-Spalte fehlt — Ergebnisse ohne Tabellen-Validierung")
             
             if options:
                 print(f"      ✅ {len(options)} Optionsscheine geparst")
