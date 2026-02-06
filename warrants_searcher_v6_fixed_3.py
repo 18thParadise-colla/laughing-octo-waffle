@@ -649,33 +649,45 @@ class INGOptionsFinder:
         t = re.sub(r'\s+', ' ', t).strip()
         return t
 
-    def _build_header_map(self, rows: List) -> Dict[str, int]:
-        """Build a header->index map using table headers or data-label attributes."""
-        alias_map = {
+    def _header_alias_map(self) -> Dict[str, set]:
+        """Return header alias map for column detection."""
+        return {
             "basispreis": {"basispreis", "strike", "strike abs", "strikeabs", "ausuebungspreis"},
             "laufzeit": {"faelligkeit", "faelligkeitsdatum", "laufzeit", "date maturity", "datematurity"},
             "geld": {"geld", "bid", "quote bid", "bidkurs"},
             "brief": {"brief", "ask", "quote ask", "askkurs", "briefkurs"},
-            "hebel": {"hebel", "leverage"},
+            "hebel": {"hebel", "leverage", "einfacher hebel"},
             "omega": {"omega"},
             "impl_vola": {"implizite volatilitaet", "implizite vola", "impl vola", "implied volatility", "implied volatility ask"},
-            "spread_pct": {"spread", "spread ask pct", "spread pct", "spread in pct", "spread in prozent"},
+            "spread_pct": {
+                "spread",
+                "spread ask pct",
+                "spread pct",
+                "spread in pct",
+                "spread in prozent",
+                "spread in",
+            },
             "aufgeld_pct": {"aufgeld", "aufgeld in pct", "premium", "premium ask"},
             "ausuebung": {"ausuebung", "ausuebungsart", "exercise", "exercise style", "name exercise style"},
             "emittent": {"emittent", "issuer", "issuer name"},
         }
 
-        def match_alias(label: str) -> Optional[str]:
-            for key, aliases in alias_map.items():
-                if label in aliases:
-                    return key
-            return None
+    def _match_alias(self, label: str, alias_map: Dict[str, set]) -> Optional[str]:
+        """Match normalized label to alias map key."""
+        for key, aliases in alias_map.items():
+            if label in aliases:
+                return key
+        return None
+
+    def _build_header_map(self, rows: List) -> Dict[str, int]:
+        """Build a header->index map using table headers or data-label attributes."""
+        alias_map = self._header_alias_map()
 
         header_map: Dict[str, int] = {}
         header_cells = rows[0].find_all(['th', 'td']) if rows else []
         for idx, cell in enumerate(header_cells):
             label = self._normalize_header(cell.get_text(strip=True))
-            key = match_alias(label)
+            key = self._match_alias(label, alias_map)
             if key and key not in header_map:
                 header_map[key] = idx
 
@@ -689,13 +701,36 @@ class INGOptionsFinder:
         for idx, cell in enumerate(sample_row.find_all('td')):
             label_raw = cell.get("data-label") or cell.get("data-title") or ""
             label = self._normalize_header(label_raw)
-            key = match_alias(label)
+            key = self._match_alias(label, alias_map)
             if key and key not in header_map:
                 header_map[key] = idx
         return header_map
 
-    def _pick_cell_text(self, cells: List, header_map: Dict[str, int], key: str, fallback_idx: int) -> str:
-        """Pick text from a mapped column or fallback index."""
+    def _build_row_map(self, cells: List) -> Dict[str, int]:
+        """Build a map from data-label/data-title within a row."""
+        alias_map = self._header_alias_map()
+        row_map: Dict[str, int] = {}
+        for idx, cell in enumerate(cells):
+            label_raw = cell.get("data-label") or cell.get("data-title") or ""
+            label = self._normalize_header(label_raw)
+            key = self._match_alias(label, alias_map)
+            if key and key not in row_map:
+                row_map[key] = idx
+        return row_map
+
+    def _pick_cell_text(
+        self,
+        cells: List,
+        header_map: Dict[str, int],
+        key: str,
+        fallback_idx: int,
+        row_map: Optional[Dict[str, int]] = None,
+    ) -> str:
+        """Pick text from row map, header map, or fallback index."""
+        if row_map:
+            idx = row_map.get(key)
+            if idx is not None and idx < len(cells):
+                return cells[idx].get_text(strip=True)
         idx = header_map.get(key)
         if idx is not None and idx < len(cells):
             return cells[idx].get_text(strip=True)
@@ -902,6 +937,7 @@ class INGOptionsFinder:
         """Parse einzelne Optionsschein-Zeile"""
         try:
             header_map = header_map or {}
+            row_map = self._build_row_map(cells)
             # Spalte 0: WKN/Name
             wkn_cell = cells[0]
             wkn_link = wkn_cell.find('a')
@@ -949,17 +985,17 @@ class INGOptionsFinder:
                 exercise_idx = 10
                 emittent_idx = 11
 
-            strike_text = self._pick_cell_text(cells, header_map, "basispreis", strike_idx)
-            maturity = self._pick_cell_text(cells, header_map, "laufzeit", maturity_idx)
-            bid_text = self._pick_cell_text(cells, header_map, "geld", bid_idx)
-            ask_text = self._pick_cell_text(cells, header_map, "brief", ask_idx)
-            leverage_text = self._pick_cell_text(cells, header_map, "hebel", leverage_idx)
-            omega_text = self._pick_cell_text(cells, header_map, "omega", omega_idx)
-            impl_text = self._pick_cell_text(cells, header_map, "impl_vola", impl_idx)
-            spread_text = self._pick_cell_text(cells, header_map, "spread_pct", spread_idx)
-            premium_text = self._pick_cell_text(cells, header_map, "aufgeld_pct", premium_idx)
-            exercise = self._pick_cell_text(cells, header_map, "ausuebung", exercise_idx)
-            emittent = self._pick_cell_text(cells, header_map, "emittent", emittent_idx)
+            strike_text = self._pick_cell_text(cells, header_map, "basispreis", strike_idx, row_map=row_map)
+            maturity = self._pick_cell_text(cells, header_map, "laufzeit", maturity_idx, row_map=row_map)
+            bid_text = self._pick_cell_text(cells, header_map, "geld", bid_idx, row_map=row_map)
+            ask_text = self._pick_cell_text(cells, header_map, "brief", ask_idx, row_map=row_map)
+            leverage_text = self._pick_cell_text(cells, header_map, "hebel", leverage_idx, row_map=row_map)
+            omega_text = self._pick_cell_text(cells, header_map, "omega", omega_idx, row_map=row_map)
+            impl_text = self._pick_cell_text(cells, header_map, "impl_vola", impl_idx, row_map=row_map)
+            spread_text = self._pick_cell_text(cells, header_map, "spread_pct", spread_idx, row_map=row_map)
+            premium_text = self._pick_cell_text(cells, header_map, "aufgeld_pct", premium_idx, row_map=row_map)
+            exercise = self._pick_cell_text(cells, header_map, "ausuebung", exercise_idx, row_map=row_map)
+            emittent = self._pick_cell_text(cells, header_map, "emittent", emittent_idx, row_map=row_map)
 
             strike = self._parse_number(strike_text) if strike_text else 0
             bid = self._parse_price(bid_text) if bid_text else 0
