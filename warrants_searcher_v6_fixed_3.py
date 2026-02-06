@@ -1592,6 +1592,30 @@ def run_complete_analysis(tickers, min_score=7):
             lines.append(f"{move:+.1f}% -> {profit:+.3f} EUR")
         return "P/L-Simulation (vereinfacht, nur innerer Wert): " + " | ".join(lines)
 
+    def add_position_sizing(
+        df: pd.DataFrame,
+        investment_eur: float = 200.0,
+        stop_loss_pct: float = 0.10
+    ) -> pd.DataFrame:
+        df = df.copy()
+        price = df["brief"].astype(float)
+        safe_price = price.where(price > 0, np.nan)
+        quantity = np.floor(investment_eur / safe_price).fillna(0).astype(int)
+        stop_price = safe_price * (1 - stop_loss_pct)
+        total_cost = quantity * safe_price
+        cash_left = investment_eur - total_cost
+        total_risk = quantity * (safe_price - stop_price)
+        df["investment_eur"] = investment_eur
+        df["stop_loss_pct"] = stop_loss_pct * 100
+        df["order_qty"] = quantity
+        df["entry_price_eur"] = safe_price
+        df["stop_price_eur"] = stop_price
+        df["total_cost_eur"] = total_cost
+        df["cash_left_eur"] = cash_left
+        df["risk_to_stop_eur"] = total_risk
+        return df
+
+    df_final = add_position_sizing(df_final, investment_eur=200.0, stop_loss_pct=0.10)
     final_top3 = df_final.head(3)
 
     for i, (_, opt) in enumerate(final_top3.iterrows(), 1):
@@ -1611,6 +1635,15 @@ def run_complete_analysis(tickers, min_score=7):
         print(f"   ├─ Break-Even-Score: {opt['breakeven_score']}/10 | Leverage-Score: {opt['leverage_score']}/5")
         print(f"   {format_stakeholder_note(opt)}")
         print(f"   {format_pl_simulation(opt)}")
+        print(
+            "   200€-Setup (Stop 10%): "
+            f"Stück {int(opt['order_qty'])} | "
+            f"Entry {opt['entry_price_eur']:.3f}€ | "
+            f"Stop {opt['stop_price_eur']:.3f}€ | "
+            f"Kosten {opt['total_cost_eur']:.2f}€ | "
+            f"Rest {opt['cash_left_eur']:.2f}€ | "
+            f"Risiko {opt['risk_to_stop_eur']:.2f}€"
+        )
     
     # Export
     output_file = 'top_optionsscheine_ing.csv'
