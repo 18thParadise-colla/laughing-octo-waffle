@@ -1540,6 +1540,7 @@ def run_complete_analysis(tickers, min_score=7):
         # Speichere für finalen Export
         top3['ticker'] = ticker
         top3['asset_score'] = asset['Score']
+        top3['asset_close'] = asset['Close']
         all_top_options.append(top3)
         
         time.sleep(1)
@@ -1555,9 +1556,44 @@ def run_complete_analysis(tickers, min_score=7):
     print("\n\n" + "=" * 80)
     print("🏆 FINALE TOP 3 OPTIONSSCHEINE (alle Basiswerte)")
     print("=" * 80)
-    
+
+    def format_stakeholder_note(option_row: pd.Series) -> str:
+        reasons = []
+        if option_row["spread_pct"] <= 1.0:
+            reasons.append("enger Spread für saubere Ausführung")
+        if option_row["theta_pct_pro_tag"] <= 5:
+            reasons.append("geringer Zeitwertverlust")
+        if abs(option_row["move_needed_pct"]) <= 2:
+            reasons.append("Break-even mit kleiner Bewegung erreichbar")
+        if option_row["omega"] >= 8:
+            reasons.append("gute Omega-Sensitivität für kurzfristige Moves")
+        if not reasons:
+            reasons.append("ausgewogenes Chancen/Risiko-Profil")
+        reason_text = ", ".join(reasons[:3])
+        return (
+            f"Stakeholder-Info: Fokus auf {option_row['ticker']} mit WKN {option_row['wkn']} "
+            f"({reason_text})."
+        )
+
+    def format_pl_simulation(option_row: pd.Series) -> str:
+        current_price = option_row["asset_close"]
+        strike = option_row["basispreis"]
+        premium = option_row["brief"]
+        ratio = option_row.get("bezugsverhaeltnis") or 1.0
+        if ratio <= 0:
+            ratio = 1.0
+        move_base = max(option_row["move_needed_pct"], 0)
+        scenarios = [move_base, move_base + 2, move_base + 5]
+        lines = []
+        for move in scenarios:
+            new_price = current_price * (1 + move / 100)
+            intrinsic = max(0, new_price - strike) * ratio
+            profit = intrinsic - premium
+            lines.append(f"{move:+.1f}% -> {profit:+.3f} EUR")
+        return "P/L-Simulation (vereinfacht, nur innerer Wert): " + " | ".join(lines)
+
     final_top3 = df_final.head(3)
-    
+
     for i, (_, opt) in enumerate(final_top3.iterrows(), 1):
         print(f"\n{i}. RANG - {opt['ticker']} CALL | WKN: {opt['wkn']}")
         print(f"   {'─'*76}")
@@ -1573,6 +1609,8 @@ def run_complete_analysis(tickers, min_score=7):
         print(f"   ├─ Strike-Score: {opt['strike_score']}/20 | Theta-Score: {opt['theta_score']}/15")
         print(f"   ├─ Vola-Score: {opt['vola_score']}/10 | Aufgeld-Score: {opt['aufgeld_score']}/5")
         print(f"   ├─ Break-Even-Score: {opt['breakeven_score']}/10 | Leverage-Score: {opt['leverage_score']}/5")
+        print(f"   {format_stakeholder_note(opt)}")
+        print(f"   {format_pl_simulation(opt)}")
     
     # Export
     output_file = 'top_optionsscheine_ing.csv'
@@ -1689,8 +1727,3 @@ if __name__ == "__main__":
     print("\n" + "=" * 80)
     print("✅ ANALYSE ABGESCHLOSSEN")
     print("=" * 80)
-    print("\n💡 HINWEISE:")
-    print("- Validiere WKNs manuell auf onvista.de vor Trading")
-    print("- Spread und Laufzeit ändern sich täglich")
-    print("- Top-Optionsscheine sind nach Gesamt-Score sortiert")
-    print("- ING-Filter bevorzugt (straffe Broker-Vorgaben)")
