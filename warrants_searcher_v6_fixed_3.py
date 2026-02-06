@@ -638,6 +638,70 @@ class INGOptionsFinder:
         text_ratio = text_hits / total
         numeric_ratio = numeric_hits / total
         return text_ratio >= 0.3 and text_hits >= numeric_hits
+
+    def _normalize_header(self, text: str) -> str:
+        """Normalize header text for robust column mapping."""
+        if not text:
+            return ""
+        t = text.lower()
+        t = t.replace('%', ' pct ')
+        t = re.sub(r'[^a-z0-9äöüß ]+', ' ', t)
+        t = re.sub(r'\s+', ' ', t).strip()
+        return t
+
+    def _build_header_map(self, rows: List) -> Dict[str, int]:
+        """Build a header->index map using table headers or data-label attributes."""
+        alias_map = {
+            "basispreis": {"basispreis", "strike", "strike abs", "strikeabs", "ausuebungspreis"},
+            "laufzeit": {"faelligkeit", "faelligkeitsdatum", "laufzeit", "date maturity", "datematurity"},
+            "geld": {"geld", "bid", "quote bid", "bidkurs"},
+            "brief": {"brief", "ask", "quote ask", "askkurs", "briefkurs"},
+            "hebel": {"hebel", "leverage"},
+            "omega": {"omega"},
+            "impl_vola": {"implizite volatilitaet", "implizite vola", "impl vola", "implied volatility", "implied volatility ask"},
+            "spread_pct": {"spread", "spread ask pct", "spread pct", "spread in pct", "spread in prozent"},
+            "aufgeld_pct": {"aufgeld", "aufgeld in pct", "premium", "premium ask"},
+            "ausuebung": {"ausuebung", "ausuebungsart", "exercise", "exercise style", "name exercise style"},
+            "emittent": {"emittent", "issuer", "issuer name"},
+        }
+
+        def match_alias(label: str) -> Optional[str]:
+            for key, aliases in alias_map.items():
+                if label in aliases:
+                    return key
+            return None
+
+        header_map: Dict[str, int] = {}
+        header_cells = rows[0].find_all(['th', 'td']) if rows else []
+        for idx, cell in enumerate(header_cells):
+            label = self._normalize_header(cell.get_text(strip=True))
+            key = match_alias(label)
+            if key and key not in header_map:
+                header_map[key] = idx
+
+        if header_map:
+            return header_map
+
+        # Fallback: use data-label/data-title attributes from first data row
+        sample_row = rows[1] if len(rows) > 1 else None
+        if not sample_row:
+            return header_map
+        for idx, cell in enumerate(sample_row.find_all('td')):
+            label_raw = cell.get("data-label") or cell.get("data-title") or ""
+            label = self._normalize_header(label_raw)
+            key = match_alias(label)
+            if key and key not in header_map:
+                header_map[key] = idx
+        return header_map
+
+    def _pick_cell_text(self, cells: List, header_map: Dict[str, int], key: str, fallback_idx: int) -> str:
+        """Pick text from a mapped column or fallback index."""
+        idx = header_map.get(key)
+        if idx is not None and idx < len(cells):
+            return cells[idx].get_text(strip=True)
+        if fallback_idx < len(cells):
+            return cells[fallback_idx].get_text(strip=True)
+        return ""
     
     def build_search_url_variants(self, underlying: str, option_type: str, 
                                    strike_min: float, strike_max: float) -> List[str]:
@@ -709,6 +773,8 @@ class INGOptionsFinder:
             if debug:
                 print(f"      🎯 Detected underlying column: {underlying_col}")
 
+            header_map = self._build_header_map(rows)
+
             for idx, row in enumerate(rows):
                 cells = row.find_all('td')
 
@@ -737,7 +803,7 @@ class INGOptionsFinder:
                     continue  # Skip diese Zeile
                 
                 try:
-                    option = self._parse_option_row(cells)
+                    option = self._parse_option_row(cells, header_map=header_map)
                     if option:
                         options.append(option)
                     else:
@@ -832,9 +898,10 @@ class INGOptionsFinder:
         
         return options
     
-    def _parse_option_row(self, cells: List) -> Optional[Dict]:
+    def _parse_option_row(self, cells: List, header_map: Optional[Dict[str, int]] = None) -> Optional[Dict]:
         """Parse einzelne Optionsschein-Zeile"""
         try:
+            header_map = header_map or {}
             # Spalte 0: WKN/Name
             wkn_cell = cells[0]
             wkn_link = wkn_cell.find('a')
@@ -853,8 +920,6 @@ class INGOptionsFinder:
             # Produktname extrahieren
             name = wkn_cell.get_text(strip=True).replace(wkn, '').strip()
             
-            # Flexible Spalten-Mapping: manche Tabellen haben Strike in Spalte 1, andere in Spalte 2
-            # Erkenne, ob Spalte 1 ein Strike (enthält 'EUR' oder Zahlen + 'EUR')
             def looks_like_money_cell(cell):
                 txt = cell.get_text(strip=True)
                 return bool(re.search(r'\d+[\.,]?\d*\s*(€|eur|EUR|EUR|EUR)?', txt)) and ('€' in txt or 'EUR' in txt.upper() or re.search(r'\d+[,\.]\d+', txt))
@@ -872,7 +937,6 @@ class INGOptionsFinder:
             emittent_idx = 12
 
             if len(cells) > 1 and looks_like_money_cell(cells[1]):
-                # Variante A: Strike in Spalte 1, Maturity in 2, bid/ask in 3/4
                 strike_idx = 1
                 maturity_idx = 2
                 bid_idx = 3
@@ -885,25 +949,26 @@ class INGOptionsFinder:
                 exercise_idx = 10
                 emittent_idx = 11
 
-            strike = self._parse_number(cells[strike_idx].get_text(strip=True)) if len(cells) > strike_idx else 0
-            maturity = cells[maturity_idx].get_text(strip=True) if len(cells) > maturity_idx else ""
-            bid = self._parse_price(cells[bid_idx].get_text(strip=True)) if len(cells) > bid_idx else 0
-            ask = self._parse_price(cells[ask_idx].get_text(strip=True)) if len(cells) > ask_idx else 0
+            strike_text = self._pick_cell_text(cells, header_map, "basispreis", strike_idx)
+            maturity = self._pick_cell_text(cells, header_map, "laufzeit", maturity_idx)
+            bid_text = self._pick_cell_text(cells, header_map, "geld", bid_idx)
+            ask_text = self._pick_cell_text(cells, header_map, "brief", ask_idx)
+            leverage_text = self._pick_cell_text(cells, header_map, "hebel", leverage_idx)
+            omega_text = self._pick_cell_text(cells, header_map, "omega", omega_idx)
+            impl_text = self._pick_cell_text(cells, header_map, "impl_vola", impl_idx)
+            spread_text = self._pick_cell_text(cells, header_map, "spread_pct", spread_idx)
+            premium_text = self._pick_cell_text(cells, header_map, "aufgeld_pct", premium_idx)
+            exercise = self._pick_cell_text(cells, header_map, "ausuebung", exercise_idx)
+            emittent = self._pick_cell_text(cells, header_map, "emittent", emittent_idx)
 
-            # Hebel, Omega, Impl.Vola, Spread
-            leverage = self._parse_number(cells[leverage_idx].get_text(strip=True)) if len(cells) > leverage_idx else 0
-            omega = self._parse_number(cells[omega_idx].get_text(strip=True)) if len(cells) > omega_idx else 0
-            impl_vola = self._parse_number(cells[impl_idx].get_text(strip=True)) if len(cells) > impl_idx else 0
-            spread_pct = self._parse_number(cells[spread_idx].get_text(strip=True)) if len(cells) > spread_idx else 0
-
-            # Premium (Aufgeld)
-            premium = self._parse_number(cells[premium_idx].get_text(strip=True)) if len(cells) > premium_idx else 0
-
-            # Ausübungsart
-            exercise = cells[exercise_idx].get_text(strip=True) if len(cells) > exercise_idx else ""
-
-            # Emittent
-            emittent = cells[emittent_idx].get_text(strip=True) if len(cells) > emittent_idx else ""
+            strike = self._parse_number(strike_text) if strike_text else 0
+            bid = self._parse_price(bid_text) if bid_text else 0
+            ask = self._parse_price(ask_text) if ask_text else 0
+            leverage = self._parse_number(leverage_text) if leverage_text else 0
+            omega = self._parse_number(omega_text) if omega_text else 0
+            impl_vola = self._parse_number(impl_text) if impl_text else 0
+            spread_pct = self._parse_number(spread_text) if spread_text else 0
+            premium = self._parse_number(premium_text) if premium_text else 0
             
             if strike == 0 or ask == 0:
                 return None
