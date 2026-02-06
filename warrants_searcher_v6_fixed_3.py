@@ -1089,8 +1089,12 @@ class INGOptionsFinder:
             for label, value in pairs.items():
                 if "einfacher hebel" in label:
                     detail_data["einfacher_hebel"] = self._parse_number(value)
+                if "omega" in label:
+                    detail_data["omega"] = self._parse_number(value)
                 if "bezugsverhältnis" in label:
                     detail_data["bezugsverhaeltnis"] = self._parse_number(value)
+                if "spread in %" in label or label == "spread in %":
+                    detail_data["spread_pct"] = self._parse_number(value)
                 if "restlaufzeit" in label:
                     days = self._parse_number(value)
                     detail_data["restlaufzeit_tage"] = int(days) if days else None
@@ -1115,8 +1119,12 @@ class INGOptionsFinder:
             detail = self._fetch_option_details(detail_url)
             if detail.get("einfacher_hebel"):
                 opt['hebel'] = detail["einfacher_hebel"]
+            if detail.get("omega"):
+                opt['omega'] = detail["omega"]
             if detail.get("bezugsverhaeltnis"):
                 opt['bezugsverhaeltnis'] = detail["bezugsverhaeltnis"]
+            if detail.get("spread_pct"):
+                opt['spread_pct'] = detail["spread_pct"]
             if detail.get("restlaufzeit_tage") is not None:
                 opt['restlaufzeit_tage'] = detail["restlaufzeit_tage"]
             if detail.get("laufzeit_datum"):
