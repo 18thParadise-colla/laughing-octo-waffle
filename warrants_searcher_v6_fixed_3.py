@@ -150,18 +150,6 @@ def check_basiswert(ticker, period="6mo", interval="1d"):
         "Reasoning": " | ".join(reasons)
     }
 
-def strike_step(ticker):
-    """Bestimme Strike-Schritte für verschiedene Ticker"""
-    if not ticker.endswith(".DE") and not ticker.startswith("^"):
-        return 5  # US Aktien → 5$
-    elif ticker.endswith(".DE"):
-        return 1  # Deutsche Aktien → 1€
-    elif ticker.startswith("^G") or ticker.startswith("^N") or ticker.startswith("^S"):
-        return 50  # Indizes
-    else:
-        return 5
-
-
 # ================================
 # TEIL 2: ING OPTIONSSCHEIN-FINDER
 # ================================
@@ -231,8 +219,6 @@ class INGOptionsFinder:
     
     def _generate_name_variants(self, ticker: str) -> List[str]:
         """Generiere Namens-Varianten wenn kein Mapping existiert"""
-        base = ticker.replace('.DE', '').replace('.US', '')
-        
         # Umfassendes Mapping: Ticker → Onvista-Basiswert-Name
         ticker_map = {
             # === DEUTSCHE AKTIEN ===
@@ -260,15 +246,14 @@ class INGOptionsFinder:
             "DPW": ["Deutsche-Post"],
             "HEI": ["HeidelbergCement"],
             "HOCN": ["Hochtief"],
-            "HYQ": ["Hannover-Rueck"],
+            "HNR1": ["Hannover-Rueck"],
             "CBK": ["Commerzbank"],
-            "E3N": ["E-ON"],
-            "HLI": ["HeidelbergCement"],
-            "CLS1": ["Covestro"],
+            "DHL": ["Deutsche-Post"],
+            "1COV": ["Covestro"],
             
             # === US TECH (MEGA CAP) ===
-            "AAPL": ["Apple"],
             "APPLE": ["Apple"],
+            "AAPL": ["Apple"],
             "MSFT": ["Microsoft"],
             "GOOGL": ["Alphabet-A", "Alphabet", "Google"],
             "GOOG": ["Alphabet-C", "Alphabet"],
@@ -317,7 +302,7 @@ class INGOptionsFinder:
             "MS": ["Morgan-Stanley"],
             
             # === US FINANCIALS (INSURANCE) ===
-            "BRK.B": ["Berkshire-Hathaway-B"],
+            "BRK-B": ["Berkshire-Hathaway-B"],
             "AIG": ["AIG"],
             "ALL": ["Allstate"],
             "PGR": ["Progressive"],
@@ -382,6 +367,15 @@ class INGOptionsFinder:
             # === SONSTIGE ===
             "ASML": ["ASML-Holding"],  # Niederländisch
         }
+
+        exact_map = {
+            "MRK.DE": ["Merck-KGaA"],  # Deutsche Merck
+        }
+
+        if ticker in exact_map:
+            return exact_map[ticker]
+
+        base = ticker.replace('.DE', '').replace('.US', '')
         
         if base in ticker_map:
             return ticker_map[base]
@@ -1597,22 +1591,22 @@ def get_tickers_dynamically() -> List[str]:
         "BAYN.DE", "MRK.DE", "FRE.DE", "CBK.DE",
         
         # ===== GERMANY: Energy & Utilities =====
-        "RWE.DE", "EOAN.DE", "VOW3.DE", "E3N.DE",
+        "RWE.DE", "EOAN.DE", "VOW3.DE",
         
         # ===== GERMANY: Industrials & Defense =====
-        "RHM.DE", "MTX.DE", "HEI.DE", "HOCN.DE",
+        "RHM.DE", "MTX.DE", "HEI.DE",
         
         # ===== GERMANY: Finance & Insurance =====
-        "ALV.DE", "DBK.DE", "MUV2.DE", "HYQ.DE",
+        "ALV.DE", "DBK.DE", "MUV2.DE", "HNR1.DE",
         
         # ===== GERMANY: Consumer & Retail =====
-        "BMW.DE", "MBG.DE", "ADS.DE", "PUM.DE", "DPW.DE",
+        "BMW.DE", "MBG.DE", "ADS.DE", "PUM.DE", "DHL.DE",
         
         # ===== GERMANY: Materials & Chemicals =====
-        "BAS.DE", "LIN.DE", "HLI.DE", "CLS1.DE",
+        "BAS.DE", "LIN.DE", "1COV.DE",
         
         # ===== USA: Technology (Mega Cap) =====
-        "APPLE", "MSFT", "GOOGL", "NVDA", "META", "AMZN",
+        "AAPL", "MSFT", "GOOGL", "NVDA", "META", "AMZN",
         
         # ===== USA: Technology (Semiconductors & Hardware) =====
         "INTC", "AMD", "QCOM", "AVGO", "MU", "LRCX",
@@ -1630,7 +1624,7 @@ def get_tickers_dynamically() -> List[str]:
         "JPM", "BAC", "WFC", "C", "GS", "MS",
         
         # ===== USA: Financials (Insurance) =====
-        "BRK.B", "AIG", "ALL", "PGR",
+        "BRK-B", "AIG", "ALL", "PGR",
         
         # ===== USA: Energy & Oil =====
         "XOM", "CVX", "COP", "MPC", "PSX",
@@ -1648,7 +1642,7 @@ def get_tickers_dynamically() -> List[str]:
         "NEM", "FCX", "APD", "LYB",
         
         # ===== USA: Communication Services =====
-        "T", "VZ", "DIS", "CMCSA", "CHTR", "TWX",
+        "T", "VZ", "DIS", "CMCSA", "CHTR",
         
         # ===== USA: Utilities & Infrastructure =====
         "NEE", "DUK", "SO", "EXC", "D",
