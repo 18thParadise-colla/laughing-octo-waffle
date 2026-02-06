@@ -186,6 +186,7 @@ class INGOptionsFinder:
         self.max_retries = 3
         self.retry_delay = 1  # Sekunden
         self.search_cache = {}  # Cache für erfolgreiche Suchen
+        self.details_cache = {}  # Cache für Optionsschein-Details
     
     def ticker_to_onvista_name(self, ticker):
         """
@@ -941,8 +942,12 @@ class INGOptionsFinder:
             # Spalte 0: WKN/Name
             wkn_cell = cells[0]
             wkn_link = wkn_cell.find('a')
+            detail_url = None
             if wkn_link:
                 wkn_text = wkn_link.get_text(strip=True)
+                detail_url = wkn_link.get('href')
+                if detail_url and detail_url.startswith('/'):
+                    detail_url = f"https://www.onvista.de{detail_url}"
                 wkn_match = re.search(r'([A-Z0-9]{6})', wkn_text)
                 wkn = wkn_match.group(1) if wkn_match else wkn_text[:6]
             else:
@@ -1026,7 +1031,8 @@ class INGOptionsFinder:
                 'spread_abs': (ask - bid) if bid else 0,
                 'aufgeld_pct': premium,
                 'ausuebung': exercise,
-                'emittent': emittent
+                'emittent': emittent,
+                'detail_url': detail_url
             }
             
         except Exception as e:
@@ -1051,6 +1057,71 @@ class INGOptionsFinder:
         if match:
             return self._parse_number(match.group(1))
         return 0.0
+
+    def _normalize_label(self, text: str) -> str:
+        return re.sub(r'\s+', ' ', text or '').strip().lower()
+
+    def _extract_detail_pairs(self, soup: BeautifulSoup) -> Dict[str, str]:
+        pairs = {}
+        for row in soup.select("tr"):
+            cells = row.find_all(["th", "td"])
+            if len(cells) >= 2:
+                label = cells[0].get_text(" ", strip=True)
+                value = cells[1].get_text(" ", strip=True)
+                if label and value:
+                    pairs[self._normalize_label(label)] = value
+        for dt in soup.select("dt"):
+            dd = dt.find_next_sibling("dd")
+            if dd:
+                label = dt.get_text(" ", strip=True)
+                value = dd.get_text(" ", strip=True)
+                if label and value:
+                    pairs[self._normalize_label(label)] = value
+        return pairs
+
+    def _fetch_option_details(self, detail_url: str) -> Dict[str, Optional[float]]:
+        if not detail_url:
+            return {}
+        if detail_url in self.details_cache:
+            return self.details_cache[detail_url]
+        try:
+            resp = self.session.get(detail_url, timeout=10)
+            if resp.status_code != 200:
+                self.details_cache[detail_url] = {}
+                return {}
+            soup = BeautifulSoup(resp.text, "html.parser")
+            pairs = self._extract_detail_pairs(soup)
+            detail_data = {}
+            for label, value in pairs.items():
+                if "einfacher hebel" in label:
+                    detail_data["einfacher_hebel"] = self._parse_number(value)
+                if "restlaufzeit" in label:
+                    days = self._parse_number(value)
+                    detail_data["restlaufzeit_tage"] = int(days) if days else None
+                if "letzter handelstag" in label or "bewertungstag" in label:
+                    date_match = re.search(r'\d{2}\.\d{2}\.\d{4}', value)
+                    if date_match:
+                        detail_data["laufzeit_datum"] = date_match.group(0)
+            self.details_cache[detail_url] = detail_data
+            return detail_data
+        except Exception:
+            self.details_cache[detail_url] = {}
+            return {}
+
+    def enrich_options_with_details(self, options: List[Dict], max_options: Optional[int] = None) -> None:
+        candidates = options[:max_options] if max_options else options
+        for opt in candidates:
+            detail_url = opt.get('detail_url')
+            if not detail_url:
+                continue
+            detail = self._fetch_option_details(detail_url)
+            if detail.get("einfacher_hebel"):
+                opt['hebel'] = detail["einfacher_hebel"]
+            if detail.get("restlaufzeit_tage") is not None:
+                opt['restlaufzeit_tage'] = detail["restlaufzeit_tage"]
+            if detail.get("laufzeit_datum"):
+                opt['laufzeit'] = detail["laufzeit_datum"]
+            time.sleep(self.delay / 2)
     
     def calculate_theta_per_day(self, option: Dict, days_to_maturity: int) -> float:
         """
@@ -1103,7 +1174,9 @@ class INGOptionsFinder:
         8. Leverage-Prämie Balance
         """
         
-        days = self.calculate_days_to_maturity(option['laufzeit'])
+        days = option.get("restlaufzeit_tage")
+        if not isinstance(days, (int, float)) or days <= 0:
+            days = self.calculate_days_to_maturity(option['laufzeit'])
         theta_per_day = self.calculate_theta_per_day(option, days)
         
         # Break-Even Berechnung
@@ -1310,15 +1383,30 @@ class INGOptionsFinder:
             print(f"   💡 Tipp: Prüfe manuell auf onvista.de, wie der Basiswert geschrieben wird")
             return pd.DataFrame()
         
+        # Vorfilter für Details (reduziert Requests)
+        prefiltered = [
+            opt for opt in all_options
+            if len(opt.get('wkn', '')) == 6
+            and opt.get('basispreis', 0) > 0
+            and opt.get('spread_pct', 100) <= 3.0
+            and opt.get('omega', 0) >= 2
+        ]
+
+        if not prefiltered:
+            print(f"   ❌ Keine Optionsscheine nach Qualitätsfilter übrig (von {len(all_options)})")
+            return pd.DataFrame()
+
+        self.enrich_options_with_details(prefiltered)
+
         # Bewerte alle Optionsscheine
         scored_options = []
-        for opt in all_options:
+        for opt in prefiltered:
             scored = self.score_option(opt, asset_data, is_call)
             scored_options.append(scored)
         
         df = pd.DataFrame(scored_options)
         
-        # Qualitätsfilter
+        # Qualitätsfilter nach Scoring
         original_count = len(df)
         df = df[df['wkn'].str.len() == 6]
         df = df[df['basispreis'] > 0]
