@@ -12,7 +12,7 @@ from typing import List, Dict, Optional
 # TEIL 1: BASISWERT-CHECKER
 # ================================
 
-def calculate_atr(df: pd.DataFrame, window: int = 14) -> pd.Series:
+def calculate_atr(df, window=14):
     prev_close = df["Close"].shift(1)
     tr = pd.concat([
         df["High"] - df["Low"],
@@ -21,7 +21,7 @@ def calculate_atr(df: pd.DataFrame, window: int = 14) -> pd.Series:
     ], axis=1).max(axis=1)
     return tr.rolling(window).mean()
 
-def calculate_rsi(df: pd.DataFrame, window: int = 14) -> pd.Series:
+def calculate_rsi(df, window=14):
     """Berechne Relative Strength Index"""
     delta = df["Close"].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
@@ -30,23 +30,13 @@ def calculate_rsi(df: pd.DataFrame, window: int = 14) -> pd.Series:
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
-def calculate_recent_volatility(
-    df: pd.DataFrame,
-    window: int = 14,
-) -> pd.Series:
+def calculate_recent_volatility(df, window=14):
     """Berechne Volatilität der letzten Tage (relevanter für Short-Term)"""
     recent_returns = df["Close"].pct_change()
     return recent_returns.rolling(window).std() * 100
 
-def check_basiswert(
-    ticker: str,
-    period: str = "6mo",
-    interval: str = "1d",
-) -> Optional[Dict[str, object]]:
+def check_basiswert(ticker, period="6mo", interval="1d"):
     """Prüfe einzelnen Basiswert"""
-    if not isinstance(ticker, str) or not ticker.strip():
-        print("❌ Ungültiger Ticker (leer oder kein String)")
-        return None
     df = yf.download(ticker, period=period, interval=interval, progress=False)
 
     if df.empty or len(df) < 80:
@@ -186,7 +176,7 @@ class INGOptionsFinder:
         self.search_cache = {}  # Cache für erfolgreiche Suchen
         self.details_cache = {}  # Cache für Optionsschein-Details
     
-    def ticker_to_onvista_name(self, ticker: str) -> List[str]:
+    def ticker_to_onvista_name(self, ticker):
         """
         Konvertiere Ticker zu onvista Basiswert-Namen (DYNAMISCH)
         Lädt Mapping aus Cache oder generiert automatisch
@@ -213,12 +203,12 @@ class INGOptionsFinder:
         
         try:
             if os.path.exists(cache_file):
-                with open(cache_file, 'r', encoding='utf-8') as f:
+                with open(cache_file, 'r') as f:
                     mapping = json.load(f)
                     print(f"   📦 Onvista-Mapping geladen: {len(mapping)} Ticker")
                     return mapping
-        except (OSError, json.JSONDecodeError) as exc:
-            print(f"   ⚠️ Onvista-Mapping nicht lesbar: {exc}")
+        except:
+            pass
         
         # Fallback: Minimal-Mapping
         return {
@@ -393,21 +383,11 @@ class INGOptionsFinder:
         # Fallback: verwende Ticker selbst
         return [base]
     
-    def build_search_url(
-        self,
-        underlying: str,
-        option_type: str,
-        strike_min: float,
-        strike_max: float,
-        days_min: int = 9,
-        days_max: int = 16,
-        broker_filter: bool = True,
-    ) -> str:
+    def build_search_url(self, underlying: str, option_type: str, 
+                        strike_min: float, strike_max: float,
+                        days_min: int = 9, days_max: int = 16,
+                        broker_filter: bool = True) -> str:
         """Baue onvista URL mit optionalen ING-Filter"""
-        if not underlying or not isinstance(underlying, str):
-            raise ValueError("Underlying muss ein nicht-leerer String sein.")
-        if strike_min <= 0 or strike_max <= 0 or strike_min > strike_max:
-            raise ValueError("Ungültige Strike-Range.")
         
         today = datetime.now()
         maturity_min = (today + timedelta(days=days_min)).strftime("%Y-%m-%d")
@@ -417,9 +397,7 @@ class INGOptionsFinder:
         
         params = [
             "page=0",
-            "cols=instrument,strikeAbs,dateMaturity,quote.bid,quote.ask,"
-            "leverage,omega,impliedVolatilityAsk,spreadAskPct,premiumAsk,"
-            "nameExerciseStyle,issuer.name,theta",
+            "cols=instrument,strikeAbs,dateMaturity,quote.bid,quote.ask,leverage,omega,impliedVolatilityAsk,spreadAskPct,premiumAsk,nameExerciseStyle,issuer.name,theta",
             f"strikeAbsRange={strike_min};{strike_max}",
             f"dateMaturityRange={maturity_min};{maturity_max}",
             "spreadAskPctRange=0.3;3.0",
@@ -433,11 +411,7 @@ class INGOptionsFinder:
         
         return url + "?" + "&".join(params)
     
-    def validate_underlying(
-        self,
-        actual_underlying: str,
-        expected_underlying: str,
-    ) -> bool:
+    def validate_underlying(self, actual_underlying: str, expected_underlying: str) -> bool:
         """
         Validiere, ob ein extrahierter Basiswert-String dem erwarteten Basiswert entspricht.
         Diese Version erwartet bereits extrahierten Text (nicht mehr die ganze Zellen-Liste).
@@ -463,12 +437,7 @@ class INGOptionsFinder:
         # remove punctuation
         t = re.sub(r"[^a-z0-9äöüß ]+", " ", t)
         # remove common legal forms
-        t = re.sub(
-            r"\b(aktiengesellschaft|aktienges|aktien|aktg|ag|se|gmbh|plc|"
-            r"inc|llc|sa|nv)\b",
-            "",
-            t,
-        )
+        t = re.sub(r"\b(aktiengesellschaft|aktienges|aktien|aktg|ag|se|gmbh|plc|inc|llc|sa|nv)\b", "", t)
         # collapse spaces
         t = re.sub(r"\s+", " ", t).strip()
         return t
@@ -487,11 +456,7 @@ class INGOptionsFinder:
         matches = sum(1 for x, y in zip(e, a) if x == y)
         return (matches / max(len(e), len(a))) >= 0.6
     
-    def extract_underlying_from_cells(
-        self,
-        cells: List,
-        col_index: int = 1,
-    ) -> str:
+    def extract_underlying_from_cells(self, cells: List, col_index: int = 1) -> str:
         """Extrahiere den Basiswert aus einer gegebenen Spalte (default 1)."""
         if not cells:
             return "Unbekannt"
@@ -504,11 +469,7 @@ class INGOptionsFinder:
                 return txt
         return "Unbekannt"
 
-    def _detect_underlying_column(
-        self,
-        rows: List,
-        expected: Optional[str] = None,
-    ) -> int:
+    def _detect_underlying_column(self, rows: List, expected: str = None) -> int:
         """Heuristik: Bestimme Spaltenindex, der am ehesten den Basiswert-Namen enthält.
         Wenn `expected` übergeben wird, priorisiere Spalten, die das erwartete Wort enthalten.
         Liefert Index (int) oder 1 als Fallback.
@@ -686,31 +647,13 @@ class INGOptionsFinder:
     def _header_alias_map(self) -> Dict[str, set]:
         """Return header alias map for column detection."""
         return {
-            "basispreis": {
-                "basispreis",
-                "strike",
-                "strike abs",
-                "strikeabs",
-                "ausuebungspreis",
-            },
-            "laufzeit": {
-                "faelligkeit",
-                "faelligkeitsdatum",
-                "laufzeit",
-                "date maturity",
-                "datematurity",
-            },
+            "basispreis": {"basispreis", "strike", "strike abs", "strikeabs", "ausuebungspreis"},
+            "laufzeit": {"faelligkeit", "faelligkeitsdatum", "laufzeit", "date maturity", "datematurity"},
             "geld": {"geld", "bid", "quote bid", "bidkurs"},
             "brief": {"brief", "ask", "quote ask", "askkurs", "briefkurs"},
             "hebel": {"hebel", "leverage", "einfacher hebel"},
             "omega": {"omega"},
-            "impl_vola": {
-                "implizite volatilitaet",
-                "implizite vola",
-                "impl vola",
-                "implied volatility",
-                "implied volatility ask",
-            },
+            "impl_vola": {"implizite volatilitaet", "implizite vola", "impl vola", "implied volatility", "implied volatility ask"},
             "spread_pct": {
                 "spread",
                 "spread ask pct",
@@ -720,13 +663,7 @@ class INGOptionsFinder:
                 "spread in",
             },
             "aufgeld_pct": {"aufgeld", "aufgeld in pct", "premium", "premium ask"},
-            "ausuebung": {
-                "ausuebung",
-                "ausuebungsart",
-                "exercise",
-                "exercise style",
-                "name exercise style",
-            },
+            "ausuebung": {"ausuebung", "ausuebungsart", "exercise", "exercise style", "name exercise style"},
             "emittent": {"emittent", "issuer", "issuer name"},
         }
 
@@ -796,16 +733,9 @@ class INGOptionsFinder:
             return cells[fallback_idx].get_text(strip=True)
         return ""
     
-    def build_search_url_variants(
-        self,
-        underlying: str,
-        option_type: str,
-        strike_min: float,
-        strike_max: float,
-    ) -> List[str]:
+    def build_search_url_variants(self, underlying: str, option_type: str, 
+                                   strike_min: float, strike_max: float) -> List[str]:
         """Generiere mehrere URL-Varianten mit verschiedenen Strategien"""
-        if not underlying or not isinstance(underlying, str):
-            raise ValueError("Underlying muss ein nicht-leerer String sein.")
         urls = []
         
         # Variante 1: Standard mit ING-Filter (straff)
@@ -819,52 +749,21 @@ class INGOptionsFinder:
                                          days_min=9, days_max=16, broker_filter=False)))
         
         # Variante 3: Längere Laufzeit ohne ING-Filter (Fallback)
-        urls.append(
-            (
-                "Fallback (alle Broker, 8-20 Tage)",
-                self.build_search_url(
-                    underlying,
-                    option_type,
-                    strike_min,
-                    strike_max,
-                    days_min=8,
-                    days_max=20,
-                    broker_filter=False,
-                ),
-            )
-        )
+        urls.append(("Fallback (alle Broker, 8-20 Tage)", 
+                    self.build_search_url(underlying, option_type, strike_min, strike_max, 
+                                         days_min=8, days_max=20, broker_filter=False)))
         
         # Variante 4: Breitere Strike-Range
         expanded_min = int(strike_min * 0.85)
         expanded_max = int(strike_max * 1.15)
-        urls.append(
-            (
-                "Erweiterte Strikes (alle Broker, 8-20 Tage)",
-                self.build_search_url(
-                    underlying,
-                    option_type,
-                    expanded_min,
-                    expanded_max,
-                    days_min=8,
-                    days_max=20,
-                    broker_filter=False,
-                ),
-            )
-        )
+        urls.append(("Erweiterte Strikes (alle Broker, 8-20 Tage)", 
+                    self.build_search_url(underlying, option_type, expanded_min, expanded_max, 
+                                         days_min=8, days_max=20, broker_filter=False)))
         
         return urls
     
-    def scrape_options(
-        self,
-        url: str,
-        expected_underlying: str = "",
-        debug: bool = False,
-        retry_count: int = 0,
-    ) -> List[Dict]:
+    def scrape_options(self, url: str, expected_underlying: str = "", debug: bool = False, retry_count: int = 0) -> List[Dict]:
         """Scrape Optionsscheine von onvista mit Retry-Logik und Basiswert-Validierung"""
-        if not isinstance(url, str) or not url.startswith("http"):
-            print("      ❌ Ungültige URL für Scrape")
-            return []
         options = []
         found_underlyings = set()  # Track was tatsächlich gefunden wurde
         underlying_col = None
@@ -873,9 +772,6 @@ class INGOptionsFinder:
             response = self.session.get(url, timeout=15)
             response.raise_for_status()
             
-            if not response.content:
-                print("      ⚠️ Leere Antwort erhalten")
-                return options
             soup = BeautifulSoup(response.content, 'html.parser')
             
             if debug:
@@ -887,17 +783,9 @@ class INGOptionsFinder:
             table = soup.find('table')
             if not table:
                 if retry_count < self.max_retries:
-                    print(
-                        "      ⚠️ Keine Tabelle gefunden (Versuch "
-                        f"{retry_count + 1}/{self.max_retries})"
-                    )
+                    print(f"      ⚠️ Keine Tabelle gefunden (Versuch {retry_count + 1}/{self.max_retries})")
                     time.sleep(self.retry_delay * (2 ** retry_count))  # Exponentielles Backoff
-                    return self.scrape_options(
-                        url,
-                        expected_underlying,
-                        debug=debug,
-                        retry_count=retry_count + 1,
-                    )
+                    return self.scrape_options(url, expected_underlying, debug=debug, retry_count=retry_count + 1)
                 else:
                     print("      ❌ Keine Tabelle gefunden nach mehreren Versuchen")
                     return options
@@ -909,10 +797,7 @@ class INGOptionsFinder:
             underlying_col = self._detect_underlying_column(rows, expected=expected_underlying)
             if expected_underlying and not self._column_looks_like_underlying(rows, underlying_col):
                 if debug:
-                    print(
-                        "      ⚠️ Basiswert-Spalte wirkt numerisch — "
-                        "Validierung wird übersprungen"
-                    )
+                    print("      ⚠️ Basiswert-Spalte wirkt numerisch — Validierung wird übersprungen")
                 underlying_col = None
 
             if debug:
@@ -929,17 +814,11 @@ class INGOptionsFinder:
                 # VALIDIERUNG: extrahiere Basiswert aus detektierter Spalte (falls vorhanden)
                 actual_underlying = None
                 if underlying_col is not None:
-                    actual_underlying = self.extract_underlying_from_cells(
-                        cells,
-                        col_index=underlying_col,
-                    )
+                    actual_underlying = self.extract_underlying_from_cells(cells, col_index=underlying_col)
                     found_underlyings.add(actual_underlying)
 
                 if debug and idx == 1:  # Erste Datenzeile
-                    print(
-                        "\n      🔍 DEBUG - Spalten-Mapping (erste "
-                        f"Datenzeile): detected_col={underlying_col}"
-                    )
+                    print(f"\n      🔍 DEBUG - Spalten-Mapping (erste Datenzeile): detected_col={underlying_col}")
                     print(f"      {'─'*74}")
                     for i, cell in enumerate(cells[:15]):
                         cell_text = cell.get_text(strip=True)[:50]
@@ -948,20 +827,9 @@ class INGOptionsFinder:
                     print(f"      {'─'*74}\n")
 
                 # Basiswert-Validierung (nur wenn expected_underlying gesetzt)
-                if (
-                    expected_underlying
-                    and underlying_col is not None
-                    and not self.validate_underlying(
-                        actual_underlying,
-                        expected_underlying,
-                    )
-                ):
+                if expected_underlying and underlying_col is not None and not self.validate_underlying(actual_underlying, expected_underlying):
                     if debug and idx < 5:  # Nur erste paar Fehler zeigen
-                        print(
-                            f"      ⚠️ Zeile {idx}: FALSCHER BASISWERT "
-                            f"'{actual_underlying}' (erwartet "
-                            f"'{expected_underlying}')"
-                        )
+                        print(f"      ⚠️ Zeile {idx}: FALSCHER BASISWERT '{actual_underlying}' (erwartet '{expected_underlying}')")
                     continue  # Skip diese Zeile
                 
                 try:
@@ -970,25 +838,17 @@ class INGOptionsFinder:
                         options.append(option)
                     else:
                         if debug:
-                            sample_text = ' | '.join(
-                                [c.get_text(strip=True)[:30] for c in cells[:6]]
-                            )
-                            print(
-                                f"      ⚠️ Zeile {idx}: Parsing lieferte "
-                                f"None — Zellen: {sample_text}"
-                            )
-                except (ValueError, TypeError) as exc:
+                            sample_text = ' | '.join([c.get_text(strip=True)[:30] for c in cells[:6]])
+                            print(f"      ⚠️ Zeile {idx}: Parsing lieferte None — Zellen: {sample_text}")
+                except Exception as e:
                     if debug:
-                        print(f"      ⚠️ Parse-Fehler Zeile {idx}: {exc}")
+                        print(f"      ⚠️ Parse-Fehler Zeile {idx}: {e}")
                     continue
             
             # WARNUNG: Falls gefundene Underlyings nicht passen
             if expected_underlying:
                 # Use string-based matching to avoid creating fake cell objects
-                matching = any(
-                    self._matches_expected_string(expected_underlying, u)
-                    for u in found_underlyings
-                )
+                matching = any(self._matches_expected_string(expected_underlying, u) for u in found_underlyings)
 
                 if underlying_col is None:
                     matching = False
@@ -1019,108 +879,56 @@ class INGOptionsFinder:
                             if expected_norm in page_norm:
                                 confirmed = True
                                 break
-                        except requests.RequestException as exc:
-                            if debug:
-                                print(f"      ⚠️ Detailseite Fehler: {exc}")
+                        except Exception:
                             continue
 
                     if not confirmed and found_underlyings:
-                        print(
-                            f"\n      ⚠️ WARNUNG: Suche nach "
-                            f"'{expected_underlying}'"
-                        )
-                        print(
-                            "      ABER Tabelle enthält: "
-                            f"{', '.join(list(found_underlyings)[:5])}"
-                        )
-                        print(
-                            f"      → {len(options)} Optionsscheine werden "
-                            "IGNORIERT (falsche Underlyings)\n"
-                        )
+                        print(f"\n      ⚠️ WARNUNG: Suche nach '{expected_underlying}'")
+                        print(f"      ABER Tabelle enthält: {', '.join(list(found_underlyings)[:5])}")
+                        print(f"      → {len(options)} Optionsscheine werden IGNORIERT (falsche Underlyings)\n")
                         return []  # Keine falschen Warrants zurückgeben!
                     if confirmed:
                         # confirmed via product page — proceed but log it
-                        print(
-                            "\n      ✅ Produkt-Seiten bestätigen Ergebnisse "
-                            f"für '{expected_underlying}' — parsing trotz "
-                            "fehlender Spalte"
-                        )
+                        print(f"\n      ✅ Produkt-Seiten bestätigen Ergebnisse für '{expected_underlying}' — parsing trotz fehlender Spalte")
                     elif underlying_col is None and not found_underlyings:
-                        print(
-                            "\n      ⚠️ Basiswert-Spalte fehlt — Ergebnisse "
-                            "ohne Tabellen-Validierung"
-                        )
+                        print(f"\n      ⚠️ Basiswert-Spalte fehlt — Ergebnisse ohne Tabellen-Validierung")
             
             if options:
                 print(f"      ✅ {len(options)} Optionsscheine geparst")
                 if found_underlyings:
-                    print(
-                        "      ✓ Basiswert validiert: "
-                        f"{', '.join(list(found_underlyings)[:3])}"
-                    )
+                    print(f"      ✓ Basiswert validiert: {', '.join(list(found_underlyings)[:3])}")
             else:
                 print(f"      ⚠️ Keine Optionsscheine gefunden")
                 if found_underlyings:
-                    print(
-                        "      (Tabelle enthielt: "
-                        f"{', '.join(list(found_underlyings)[:3])})"
-                    )
+                    print(f"      (Tabelle enthielt: {', '.join(list(found_underlyings)[:3])})")
             
             time.sleep(self.delay)
             
         except requests.exceptions.Timeout:
             if retry_count < self.max_retries:
-                print(
-                    f"      ⏱️ Timeout (Versuch {retry_count + 1}/"
-                    f"{self.max_retries})"
-                )
+                print(f"      ⏱️ Timeout (Versuch {retry_count + 1}/{self.max_retries})")
                 time.sleep(self.retry_delay * (2 ** retry_count))
-                return self.scrape_options(
-                    url,
-                    expected_underlying,
-                    debug=debug,
-                    retry_count=retry_count + 1,
-                )
+                return self.scrape_options(url, expected_underlying, debug=debug, retry_count=retry_count + 1)
             else:
                 print(f"      ❌ Timeout nach {self.max_retries} Versuchen")
         except requests.exceptions.ConnectionError:
             if retry_count < self.max_retries:
-                print(
-                    f"      🌐 Verbindungsfehler (Versuch {retry_count + 1}/"
-                    f"{self.max_retries})"
-                )
+                print(f"      🌐 Verbindungsfehler (Versuch {retry_count + 1}/{self.max_retries})")
                 time.sleep(self.retry_delay * (2 ** retry_count))
-                return self.scrape_options(
-                    url,
-                    expected_underlying,
-                    debug=debug,
-                    retry_count=retry_count + 1,
-                )
+                return self.scrape_options(url, expected_underlying, debug=debug, retry_count=retry_count + 1)
             else:
                 print(f"      ❌ Verbindungsfehler nach {self.max_retries} Versuchen")
-        except requests.RequestException as exc:
+        except Exception as e:
             if retry_count < self.max_retries:
-                print(
-                    "      ❌ Fehler: "
-                    f"{type(exc).__name__} (Versuch {retry_count + 1}/{self.max_retries})"
-                )
+                print(f"      ❌ Fehler: {type(e).__name__} (Versuch {retry_count + 1}/{self.max_retries})")
                 time.sleep(self.retry_delay * (2 ** retry_count))
-                return self.scrape_options(
-                    url,
-                    expected_underlying,
-                    debug=debug,
-                    retry_count=retry_count + 1,
-                )
+                return self.scrape_options(url, expected_underlying, debug=debug, retry_count=retry_count + 1)
             else:
-                print(f"      ❌ Fehler nach {self.max_retries} Versuchen: {exc}")
+                print(f"      ❌ Fehler nach {self.max_retries} Versuchen: {e}")
         
         return options
     
-    def _parse_option_row(
-        self,
-        cells: List,
-        header_map: Optional[Dict[str, int]] = None,
-    ) -> Optional[Dict]:
+    def _parse_option_row(self, cells: List, header_map: Optional[Dict[str, int]] = None) -> Optional[Dict]:
         """Parse einzelne Optionsschein-Zeile"""
         try:
             header_map = header_map or {}
@@ -1149,16 +957,7 @@ class INGOptionsFinder:
             
             def looks_like_money_cell(cell):
                 txt = cell.get_text(strip=True)
-                return bool(
-                    re.search(
-                        r'\d+[\.,]?\d*\s*(€|eur|EUR|EUR|EUR)?',
-                        txt,
-                    )
-                ) and (
-                    '€' in txt
-                    or 'EUR' in txt.upper()
-                    or re.search(r'\d+[,\.]\d+', txt)
-                )
+                return bool(re.search(r'\d+[\.,]?\d*\s*(€|eur|EUR|EUR|EUR)?', txt)) and ('€' in txt or 'EUR' in txt.upper() or re.search(r'\d+[,\.]\d+', txt))
 
             strike_idx = 2
             maturity_idx = 3
@@ -1185,83 +984,17 @@ class INGOptionsFinder:
                 exercise_idx = 10
                 emittent_idx = 11
 
-            strike_text = self._pick_cell_text(
-                cells,
-                header_map,
-                "basispreis",
-                strike_idx,
-                row_map=row_map,
-            )
-            maturity = self._pick_cell_text(
-                cells,
-                header_map,
-                "laufzeit",
-                maturity_idx,
-                row_map=row_map,
-            )
-            bid_text = self._pick_cell_text(
-                cells,
-                header_map,
-                "geld",
-                bid_idx,
-                row_map=row_map,
-            )
-            ask_text = self._pick_cell_text(
-                cells,
-                header_map,
-                "brief",
-                ask_idx,
-                row_map=row_map,
-            )
-            leverage_text = self._pick_cell_text(
-                cells,
-                header_map,
-                "hebel",
-                leverage_idx,
-                row_map=row_map,
-            )
-            omega_text = self._pick_cell_text(
-                cells,
-                header_map,
-                "omega",
-                omega_idx,
-                row_map=row_map,
-            )
-            impl_text = self._pick_cell_text(
-                cells,
-                header_map,
-                "impl_vola",
-                impl_idx,
-                row_map=row_map,
-            )
-            spread_text = self._pick_cell_text(
-                cells,
-                header_map,
-                "spread_pct",
-                spread_idx,
-                row_map=row_map,
-            )
-            premium_text = self._pick_cell_text(
-                cells,
-                header_map,
-                "aufgeld_pct",
-                premium_idx,
-                row_map=row_map,
-            )
-            exercise = self._pick_cell_text(
-                cells,
-                header_map,
-                "ausuebung",
-                exercise_idx,
-                row_map=row_map,
-            )
-            emittent = self._pick_cell_text(
-                cells,
-                header_map,
-                "emittent",
-                emittent_idx,
-                row_map=row_map,
-            )
+            strike_text = self._pick_cell_text(cells, header_map, "basispreis", strike_idx, row_map=row_map)
+            maturity = self._pick_cell_text(cells, header_map, "laufzeit", maturity_idx, row_map=row_map)
+            bid_text = self._pick_cell_text(cells, header_map, "geld", bid_idx, row_map=row_map)
+            ask_text = self._pick_cell_text(cells, header_map, "brief", ask_idx, row_map=row_map)
+            leverage_text = self._pick_cell_text(cells, header_map, "hebel", leverage_idx, row_map=row_map)
+            omega_text = self._pick_cell_text(cells, header_map, "omega", omega_idx, row_map=row_map)
+            impl_text = self._pick_cell_text(cells, header_map, "impl_vola", impl_idx, row_map=row_map)
+            spread_text = self._pick_cell_text(cells, header_map, "spread_pct", spread_idx, row_map=row_map)
+            premium_text = self._pick_cell_text(cells, header_map, "aufgeld_pct", premium_idx, row_map=row_map)
+            exercise = self._pick_cell_text(cells, header_map, "ausuebung", exercise_idx, row_map=row_map)
+            emittent = self._pick_cell_text(cells, header_map, "emittent", emittent_idx, row_map=row_map)
 
             strike = self._parse_number(strike_text) if strike_text else 0
             bid = self._parse_price(bid_text) if bid_text else 0
@@ -1296,8 +1029,7 @@ class INGOptionsFinder:
                 'detail_url': detail_url
             }
             
-        except (ValueError, TypeError) as exc:
-            print(f"      ⚠️ Parsingfehler Optionszeile: {exc}")
+        except Exception as e:
             return None
     
     def _parse_number(self, text: str) -> float:
@@ -1308,7 +1040,7 @@ class INGOptionsFinder:
         text = re.sub(r'[^\d.\-]', '', text)
         try:
             return float(text)
-        except ValueError:
+        except:
             return 0.0
     
     def _parse_price(self, text: str) -> float:
@@ -1341,10 +1073,7 @@ class INGOptionsFinder:
                     pairs[self._normalize_label(label)] = value
         return pairs
 
-    def _fetch_option_details(
-        self,
-        detail_url: str,
-    ) -> Dict[str, Optional[float]]:
+    def _fetch_option_details(self, detail_url: str) -> Dict[str, Optional[float]]:
         if not detail_url:
             return {}
         if detail_url in self.details_cache:
@@ -1377,16 +1106,11 @@ class INGOptionsFinder:
                     detail_data["break_even"] = self._parse_number(value)
             self.details_cache[detail_url] = detail_data
             return detail_data
-        except requests.RequestException as exc:
-            print(f"      ⚠️ Detail-Request fehlgeschlagen: {exc}")
+        except Exception:
             self.details_cache[detail_url] = {}
             return {}
 
-    def enrich_options_with_details(
-        self,
-        options: List[Dict],
-        max_options: Optional[int] = None,
-    ) -> None:
+    def enrich_options_with_details(self, options: List[Dict], max_options: Optional[int] = None) -> None:
         candidates = options[:max_options] if max_options else options
         for opt in candidates:
             detail_url = opt.get('detail_url')
@@ -1440,19 +1164,12 @@ class INGOptionsFinder:
                 print(f"         Parsed Date: {maturity_date.strftime('%d.%m.%Y')}")
             
             return max(0, days)
-        except ValueError as exc:
+        except:
             # Fallback: schätze 12 Tage
-            print(
-                f"      ⚠️ Konnte Laufzeit nicht parsen: '{maturity_str}' ({exc})"
-            )
+            print(f"      ⚠️ Konnte Laufzeit nicht parsen: '{maturity_str}'")
             return 12
     
-    def score_option(
-        self,
-        option: Dict,
-        asset_data: Dict,
-        is_call: bool,
-    ) -> Dict:
+    def score_option(self, option: Dict, asset_data: Dict, is_call: bool) -> Dict:
         """
         Bewerte Optionsschein nach mehreren Kriterien
         
@@ -1624,13 +1341,8 @@ class INGOptionsFinder:
             'gesamt_score': round(total_score, 1)
         }
     
-    def find_top_options(
-        self,
-        ticker: str,
-        asset_data: Dict,
-        option_type: str = "call",
-        debug: bool = False,
-    ) -> pd.DataFrame:
+    def find_top_options(self, ticker: str, asset_data: Dict, 
+                        option_type: str = "call", debug: bool = False) -> pd.DataFrame:
         """
         Finde Top 3 Optionsscheine für einen Basiswert
         Probiert mehrere Namensvarianten und Such-Strategien mit Fallbacks
@@ -1664,25 +1376,13 @@ class INGOptionsFinder:
             print(f"\n   Probiere Basiswert-Name: '{underlying}'")
             
             # Generiere mehrere URL-Varianten für Fallback-Strategien
-            url_variants = self.build_search_url_variants(
-                underlying,
-                option_type,
-                strike_min,
-                strike_max,
-            )
+            url_variants = self.build_search_url_variants(underlying, option_type, strike_min, strike_max)
             
             for variant_name, url in url_variants:
                 print(f"      Versuche {variant_name}...", end=" ")
                 # WICHTIG: Übergebe expected_underlying für Validierung!
-                options = self.scrape_options(
-                    url,
-                    expected_underlying=underlying,
-                    debug=(
-                        debug
-                        and len(all_options) == 0
-                        and variant_name.startswith("Standard")
-                    ),
-                )
+                options = self.scrape_options(url, expected_underlying=underlying, 
+                                            debug=(debug and len(all_options) == 0 and variant_name.startswith("Standard")))
                 
                 if options:
                     print(f"✅ {len(options)} gefunden")
@@ -1693,10 +1393,7 @@ class INGOptionsFinder:
                     print("⚠️ Keine Ergebnisse")
             
             if success:
-                print(
-                    f"   ✅ {len(all_options)} Optionsscheine mit "
-                    f"'{underlying}' insgesamt gefunden"
-                )
+                print(f"   ✅ {len(all_options)} Optionsscheine mit '{underlying}' insgesamt gefunden")
                 break  # Erfolg, keine weiteren Basiswert-Varianten nötig
             else:
                 print(f"   ⚠️ Alle Strategien für '{underlying}' fehlgeschlagen")
@@ -1754,18 +1451,12 @@ class INGOptionsFinder:
 # TEIL 3: HAUPT-ANALYSE
 # ================================
 
-def run_complete_analysis(
-    tickers: List[str],
-    min_score: int = 7,
-) -> Optional[pd.DataFrame]:
+def run_complete_analysis(tickers, min_score=7):
     """
     Vollständige Analyse:
     1. Prüfe alle Basiswerte
     2. Für qualifizierte: Finde Top 3 Optionsscheine
     """
-    if not isinstance(tickers, list) or not tickers:
-        print("❌ Ticker-Liste ist leer oder ungültig.")
-        return None
     
     print("=" * 80)
     print("🎯 BASISWERT-ANALYSE & OPTIONSSCHEIN-FINDER")
@@ -1803,11 +1494,7 @@ def run_complete_analysis(
         return None
     
     print(f"\n✅ {len(df_qualified)} qualifizierte Basiswerte gefunden:\n")
-    print(
-        df_qualified[
-            ["Ticker", "Score", "Close", "ATR_%", "Long_Strike", "Short_Strike"]
-        ].to_string(index=False)
-    )
+    print(df_qualified[["Ticker", "Score", "Close", "ATR_%", "Long_Strike", "Short_Strike"]].to_string(index=False))
     
     # ===== SCHRITT 2: Top 3 Optionsscheine finden =====
     print("\n\n🎯 SCHRITT 2: Finde Top 3 Optionsscheine pro Basiswert")
@@ -1839,19 +1526,9 @@ def run_complete_analysis(
         
         for i, (_, opt) in enumerate(top3.iterrows(), 1):
             print(f"\n   {i}. WKN: {opt['wkn']} | Score: {opt['gesamt_score']}/100")
-            print(
-                f"      Strike: {opt['basispreis']} | Kurs: "
-                f"{opt['brief']:.3f} EUR | Hebel: {opt['hebel']:.1f}"
-            )
-            print(
-                f"      Omega: {opt['omega']:.1f} | Spread: "
-                f"{opt['spread_pct']:.2f}% | Laufzeit: "
-                f"{opt['tage_laufzeit']} Tage"
-            )
-            print(
-                f"      Theta: {opt['theta_pro_tag']:.4f} EUR/Tag "
-                f"({opt['theta_pct_pro_tag']:.1f}% pro Tag)"
-            )
+            print(f"      Strike: {opt['basispreis']} | Kurs: {opt['brief']:.3f} EUR | Hebel: {opt['hebel']:.1f}")
+            print(f"      Omega: {opt['omega']:.1f} | Spread: {opt['spread_pct']:.2f}% | Laufzeit: {opt['tage_laufzeit']} Tage")
+            print(f"      Theta: {opt['theta_pro_tag']:.4f} EUR/Tag ({opt['theta_pct_pro_tag']:.1f}% pro Tag)")
             print(f"      Impl.Vola: {opt['impl_vola']:.1f}% | Aufgeld: {opt['aufgeld_pct']:.1f}%")
             print(f"      Emittent: {opt['emittent']}")
             print(f"      ├─ Spread-Score: {opt['spread_score']}/25")
@@ -1885,46 +1562,17 @@ def run_complete_analysis(
         print(f"\n{i}. RANG - {opt['ticker']} CALL | WKN: {opt['wkn']}")
         print(f"   {'─'*76}")
         print(f"   Gesamt-Score: {opt['gesamt_score']}/115 ⭐")
-        print(
-            f"   Strike: {opt['basispreis']} | Kurs: "
-            f"{opt['brief']:.3f} EUR | Abweichung: "
-            f"{opt['strike_abweichung_pct']:.1f}%"
-        )
-        print(
-            f"   Omega: {opt['omega']:.1f} | Hebel: {opt['hebel']:.1f} | "
-            f"Spread: {opt['spread_pct']:.2f}%"
-        )
-        print(
-            f"   Laufzeit: {opt['tage_laufzeit']} Tage | Impl.Vola: "
-            f"{opt['impl_vola']:.1f}% | Aufgeld: {opt['aufgeld_pct']:.1f}%"
-        )
-        print(
-            f"   Zeitwertverlust: {opt['theta_pro_tag']:.4f} EUR/Tag "
-            f"({opt['theta_pct_pro_tag']:.1f}%/Tag)"
-        )
-        print(
-            f"   Break-Even: {opt['breakeven']:.2f} EUR (benötigt "
-            f"{opt['move_needed_pct']:+.1f}% Bewegung)"
-        )
-        print(
-            f"   Innerer Wert: {opt['intrinsic_value']:.3f} EUR | "
-            f"Zeitwert: {opt['extrinsic_value']:.3f} EUR "
-            f"({opt['extrinsic_pct']:.0f}%)"
-        )
+        print(f"   Strike: {opt['basispreis']} | Kurs: {opt['brief']:.3f} EUR | Abweichung: {opt['strike_abweichung_pct']:.1f}%")
+        print(f"   Omega: {opt['omega']:.1f} | Hebel: {opt['hebel']:.1f} | Spread: {opt['spread_pct']:.2f}%")
+        print(f"   Laufzeit: {opt['tage_laufzeit']} Tage | Impl.Vola: {opt['impl_vola']:.1f}% | Aufgeld: {opt['aufgeld_pct']:.1f}%")
+        print(f"   Zeitwertverlust: {opt['theta_pro_tag']:.4f} EUR/Tag ({opt['theta_pct_pro_tag']:.1f}%/Tag)")
+        print(f"   Break-Even: {opt['breakeven']:.2f} EUR (benötigt {opt['move_needed_pct']:+.1f}% Bewegung)")
+        print(f"   Innerer Wert: {opt['intrinsic_value']:.3f} EUR | Zeitwert: {opt['extrinsic_value']:.3f} EUR ({opt['extrinsic_pct']:.0f}%)")
         print(f"   Asset-Score: {opt['asset_score']}/12 | Emittent: {opt['emittent']}")
-        print(
-            f"   ├─ Spread-Score: {opt['spread_score']}/25 | "
-            f"Omega-Score: {opt['omega_score']}/25"
-        )
-        print(
-            f"   ├─ Strike-Score: {opt['strike_score']}/20 | "
-            f"Theta-Score: {opt['theta_score']}/15"
-        )
+        print(f"   ├─ Spread-Score: {opt['spread_score']}/25 | Omega-Score: {opt['omega_score']}/25")
+        print(f"   ├─ Strike-Score: {opt['strike_score']}/20 | Theta-Score: {opt['theta_score']}/15")
         print(f"   ├─ Vola-Score: {opt['vola_score']}/10 | Aufgeld-Score: {opt['aufgeld_score']}/5")
-        print(
-            f"   ├─ Break-Even-Score: {opt['breakeven_score']}/10 | "
-            f"Leverage-Score: {opt['leverage_score']}/5"
-        )
+        print(f"   ├─ Break-Even-Score: {opt['breakeven_score']}/10 | Leverage-Score: {opt['leverage_score']}/5")
     
     # Export
     output_file = 'top_optionsscheine_ing.csv'
