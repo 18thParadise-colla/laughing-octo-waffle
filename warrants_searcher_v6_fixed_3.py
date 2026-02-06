@@ -1095,6 +1095,8 @@ class INGOptionsFinder:
             for label, value in pairs.items():
                 if "einfacher hebel" in label:
                     detail_data["einfacher_hebel"] = self._parse_number(value)
+                if "bezugsverhältnis" in label:
+                    detail_data["bezugsverhaeltnis"] = self._parse_number(value)
                 if "restlaufzeit" in label:
                     days = self._parse_number(value)
                     detail_data["restlaufzeit_tage"] = int(days) if days else None
@@ -1117,6 +1119,8 @@ class INGOptionsFinder:
             detail = self._fetch_option_details(detail_url)
             if detail.get("einfacher_hebel"):
                 opt['hebel'] = detail["einfacher_hebel"]
+            if detail.get("bezugsverhaeltnis"):
+                opt['bezugsverhaeltnis'] = detail["bezugsverhaeltnis"]
             if detail.get("restlaufzeit_tage") is not None:
                 opt['restlaufzeit_tage'] = detail["restlaufzeit_tage"]
             if detail.get("laufzeit_datum"):
@@ -1183,19 +1187,23 @@ class INGOptionsFinder:
         current_price = asset_data['Close']
         strike = option['basispreis']
         premium = option['brief']
+        ratio = option.get('bezugsverhaeltnis') or 1.0
+        if ratio <= 0:
+            ratio = 1.0
+        premium_underlying = premium / ratio
         
         if is_call:
-            breakeven = strike + premium
+            breakeven = strike + premium_underlying
             move_needed = ((breakeven - current_price) / current_price) * 100
         else:
-            breakeven = strike - premium
+            breakeven = strike - premium_underlying
             move_needed = ((current_price - breakeven) / current_price) * 100
         
         # Intrinsic vs. Extrinsic Value
         if is_call:
-            intrinsic = max(0, current_price - strike)
+            intrinsic = max(0, current_price - strike) * ratio
         else:
-            intrinsic = max(0, strike - current_price)
+            intrinsic = max(0, strike - current_price) * ratio
         extrinsic = premium - intrinsic
         extrinsic_pct = (extrinsic / premium * 100) if premium > 0 else 0
         
