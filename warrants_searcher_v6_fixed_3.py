@@ -1098,6 +1098,8 @@ class INGOptionsFinder:
                     date_match = re.search(r'\d{2}\.\d{2}\.\d{4}', value)
                     if date_match:
                         detail_data["laufzeit_datum"] = date_match.group(0)
+                if "break even" in label or "breakeven" in label or "break-even" in label:
+                    detail_data["break_even"] = self._parse_number(value)
             self.details_cache[detail_url] = detail_data
             return detail_data
         except Exception:
@@ -1119,6 +1121,8 @@ class INGOptionsFinder:
                 opt['restlaufzeit_tage'] = detail["restlaufzeit_tage"]
             if detail.get("laufzeit_datum"):
                 opt['laufzeit'] = detail["laufzeit_datum"]
+            if detail.get("break_even"):
+                opt['break_even'] = detail["break_even"]
             time.sleep(self.delay / 2)
     
     def calculate_theta_per_day(self, option: Dict, days_to_maturity: int) -> float:
@@ -1192,6 +1196,14 @@ class INGOptionsFinder:
         else:
             breakeven = strike - premium_underlying
             move_needed = ((current_price - breakeven) / current_price) * 100
+
+        detail_break_even = option.get("break_even")
+        if isinstance(detail_break_even, (int, float)) and detail_break_even > 0:
+            breakeven = detail_break_even
+            if is_call:
+                move_needed = ((breakeven - current_price) / current_price) * 100
+            else:
+                move_needed = ((current_price - breakeven) / current_price) * 100
         
         # Intrinsic vs. Extrinsic Value
         if is_call:
