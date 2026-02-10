@@ -3,10 +3,13 @@ import pandas as pd
 import numpy as np
 import requests
 from bs4 import BeautifulSoup
+import json
+import os
 import time
 from datetime import datetime, timedelta
 import re
 from typing import List, Dict, Optional
+from difflib import SequenceMatcher
 
 # ================================
 # TEIL 1: BASISWERT-CHECKER
@@ -175,6 +178,7 @@ class INGOptionsFinder:
         self.retry_delay = 1  # Sekunden
         self.search_cache = {}  # Cache für erfolgreiche Suchen
         self.details_cache = {}  # Cache für Optionsschein-Details
+        self.mapping_cache_file = "onvista_mapping.json"
     
     def ticker_to_onvista_name(self, ticker):
         """
@@ -190,20 +194,23 @@ class INGOptionsFinder:
             cached = self.onvista_mapping[ticker]
             if cached:  # Nicht leere Liste
                 return cached
+
+        # Automatische Ableitung über yfinance (Big-Player + neue Ticker)
+        auto_variants = self._generate_variants_from_yfinance(ticker)
+        if auto_variants:
+            self.onvista_mapping[ticker] = auto_variants
+            self._save_onvista_mapping(self.onvista_mapping)
+            return auto_variants
         
         # Fallback: Generiere Namen-Varianten
         return self._generate_name_variants(ticker)
     
     def _load_onvista_mapping(self) -> Dict[str, List[str]]:
         """Lade onvista Mapping aus Cache-Datei"""
-        import json
-        import os
-        
-        cache_file = "onvista_mapping.json"
-        
+
         try:
-            if os.path.exists(cache_file):
-                with open(cache_file, 'r') as f:
+            if os.path.exists(self.mapping_cache_file):
+                with open(self.mapping_cache_file, 'r', encoding='utf-8') as f:
                     mapping = json.load(f)
                     print(f"   📦 Onvista-Mapping geladen: {len(mapping)} Ticker")
                     return mapping
@@ -216,6 +223,87 @@ class INGOptionsFinder:
             "^NDX": ["NASDAQ-100"],
             "^GSPC": ["S-P-500"]
         }
+
+    def _save_onvista_mapping(self, mapping: Dict[str, List[str]]) -> None:
+        """Speichere aktualisiertes Mapping in Cache-Datei."""
+        try:
+            with open(self.mapping_cache_file, 'w', encoding='utf-8') as f:
+                json.dump(mapping, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _slugify_name(name: str) -> str:
+        """Konvertiere beliebige Namen in onvista-ähnliche URL-Slug-Form."""
+        if not name:
+            return ""
+
+        replacements = {
+            "&": " and ",
+            "/": " ",
+            ",": " ",
+            ".": " ",
+            "'": " ",
+            "’": " ",
+            "–": "-",
+            "—": "-",
+        }
+        normalized = name
+        for old, new in replacements.items():
+            normalized = normalized.replace(old, new)
+
+        normalized = re.sub(r"\s+", " ", normalized.strip())
+        normalized = normalized.replace(" ", "-")
+        normalized = re.sub(r"-+", "-", normalized)
+        return normalized.strip("-")
+
+    def _generate_variants_from_yfinance(self, ticker: str) -> List[str]:
+        """Erzeuge onvista-Namensvarianten dynamisch aus yfinance-Infos."""
+        variants: List[str] = []
+
+        base_ticker = ticker.replace('.DE', '').replace('.US', '')
+        variants.append(base_ticker)
+
+        try:
+            info = yf.Ticker(ticker).info
+        except Exception:
+            info = {}
+
+        possible_names = [
+            info.get("shortName", ""),
+            info.get("longName", ""),
+            info.get("displayName", ""),
+            info.get("name", "")
+        ]
+
+        for name in possible_names:
+            if not name:
+                continue
+            variants.append(name)
+            variants.append(self._slugify_name(name))
+
+            cleaned = re.sub(
+                r"\b(Inc|Incorporated|Corp|Corporation|Company|PLC|N\.V\.|AG|SE|S\.A\.|Ltd|Limited|Holdings?)\b",
+                "",
+                name,
+                flags=re.IGNORECASE,
+            )
+            variants.append(cleaned.strip())
+            variants.append(self._slugify_name(cleaned))
+
+        unique_variants = []
+        seen = set()
+        for variant in variants:
+            value = variant.strip()
+            if not value:
+                continue
+            key = value.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            unique_variants.append(value)
+
+        return unique_variants[:8]
     
     def _generate_name_variants(self, ticker: str) -> List[str]:
         """Generiere Namens-Varianten wenn kein Mapping existiert"""
@@ -446,18 +534,32 @@ class INGOptionsFinder:
         return t
 
     def _matches_expected_string(self, expected: str, actual: str) -> bool:
-        """Compare two strings with normalized substring and relaxed fuzzy matching (60%)."""
+        """Strikter String-Match für Basiswerte (vermeidet False Positives)."""
         if not expected or not actual:
             return False
+
         e = self._normalize_name(expected)
         a = self._normalize_name(actual)
         if not e or not a:
             return False
-        if e in a or a in e:
+
+        # Direct exact / containment matches first
+        if e == a or e in a or a in e:
             return True
-        # simple fuzzy: proportion of identical chars over max length
-        matches = sum(1 for x, y in zip(e, a) if x == y)
-        return (matches / max(len(e), len(a))) >= 0.6
+
+        # For very short expected values (e.g. ticker-like) require exact token hit
+        if len(e) <= 4:
+            return e in set(a.split())
+
+        e_tokens = {tok for tok in e.split() if len(tok) >= 3}
+        a_tokens = {tok for tok in a.split() if len(tok) >= 3}
+        if e_tokens and a_tokens:
+            overlap = len(e_tokens & a_tokens) / max(len(e_tokens), 1)
+            if overlap >= 0.6:
+                return True
+
+        # Fallback fuzzy check only for longer names
+        return SequenceMatcher(None, e, a).ratio() >= 0.82
     
     def extract_underlying_from_cells(self, cells: List, col_index: int = 1) -> str:
         """Extrahiere den Basiswert aus einer gegebenen Spalte (default 1)."""
@@ -773,6 +875,39 @@ class INGOptionsFinder:
         for label, url in urls_with_labels:
             print(f"      - {label}: {url}")
     
+    def _extract_product_underlying(self, html_text: str) -> str:
+        """Extrahiere Basiswert von einer Produktseite (falls vorhanden)."""
+        if not html_text:
+            return ""
+
+        soup = BeautifulSoup(html_text, 'html.parser')
+
+        # Häufiges Muster: Tabelle/Key-Value mit Label "Basiswert"
+        for row in soup.find_all(['tr', 'li', 'div']):
+            text = row.get_text(" ", strip=True)
+            if not text:
+                continue
+            if "basiswert" in text.lower() and len(text) < 200:
+                parts = re.split(r"basiswert\s*:?", text, flags=re.IGNORECASE)
+                if len(parts) > 1:
+                    candidate = parts[-1].strip(' -:|')
+                    if candidate:
+                        return candidate
+
+        # Fallback: Suche strukturierte Elemente
+        labels = soup.find_all(string=re.compile(r"Basiswert", re.IGNORECASE))
+        for label in labels:
+            parent = label.parent
+            if not parent:
+                continue
+            sibling = parent.find_next(['td', 'dd', 'span'])
+            if sibling:
+                candidate = sibling.get_text(" ", strip=True)
+                if candidate:
+                    return candidate
+
+        return ""
+
     def scrape_options(self, url: str, expected_underlying: str = "", debug: bool = False, retry_count: int = 0) -> List[Dict]:
         """Scrape Optionsscheine von onvista mit Retry-Logik und Basiswert-Validierung"""
         options = []
@@ -864,12 +999,13 @@ class INGOptionsFinder:
                 if underlying_col is None:
                     matching = False
 
-                # If no direct match found in the table, try a lightweight product-page confirmation
+                # If no direct match found in the table, verify via product pages
                 if not matching:
-                    expected_norm = self._normalize_name(expected_underlying)
-                    # Try up to 5 product links from the table to confirm underlying
                     confirmed = False
-                    for row in rows[1: min(6, len(rows))]:
+                    confirmed_underlyings = set()
+
+                    # Try up to 6 product links from the table to confirm exact basiswert
+                    for row in rows[1: min(7, len(rows))]:
                         cells = row.find_all('td')
                         if not cells:
                             continue
@@ -878,32 +1014,35 @@ class INGOptionsFinder:
                         if not a or not a.get('href'):
                             continue
                         href = a.get('href')
-                        # Build absolute URL
                         if href.startswith('/'):
                             href = 'https://www.onvista.de' + href
                         try:
                             r = self.session.get(href, timeout=8)
                             if r.status_code != 200:
                                 continue
-                            page_text = r.text
-                            page_norm = self._normalize_name(page_text)
-                            if expected_norm in page_norm:
-                                confirmed = True
-                                break
+                            product_underlying = self._extract_product_underlying(r.text)
+                            if product_underlying:
+                                confirmed_underlyings.add(product_underlying)
+                                if self._matches_expected_string(expected_underlying, product_underlying):
+                                    confirmed = True
+                                    break
                         except Exception:
                             continue
 
-                    if not confirmed and found_underlyings:
-                        print(f"\n      ⚠️ WARNUNG: Suche nach '{expected_underlying}'")
-                        print(f"      ABER Tabelle enthält: {', '.join(list(found_underlyings)[:5])}")
-                        print(f"      → {len(options)} Optionsscheine werden IGNORIERT (falsche Underlyings)\n")
-                        return []  # Keine falschen Warrants zurückgeben!
                     if confirmed:
-                        # confirmed via product page — proceed but log it
-                        print(f"\n      ✅ Produkt-Seiten bestätigen Ergebnisse für '{expected_underlying}' — parsing trotz fehlender Spalte")
-                    elif underlying_col is None and not found_underlyings:
-                        print(f"\n      ⚠️ Basiswert-Spalte fehlt — Ergebnisse ohne Tabellen-Validierung")
-            
+                        print(f"\n      ✅ Produkt-Seiten bestätigen Basiswert '{expected_underlying}'")
+                    else:
+                        if confirmed_underlyings:
+                            print(f"\n      ⚠️ WARNUNG: Suche nach '{expected_underlying}'")
+                            print(f"      Produktseiten zeigen stattdessen: {', '.join(list(confirmed_underlyings)[:5])}")
+                        elif found_underlyings:
+                            print(f"\n      ⚠️ WARNUNG: Suche nach '{expected_underlying}'")
+                            print(f"      Tabelle enthält: {', '.join(list(found_underlyings)[:5])}")
+                        else:
+                            print(f"\n      ⚠️ Basiswert konnte nicht verifiziert werden: '{expected_underlying}'")
+                        print(f"      → {len(options)} Optionsscheine werden IGNORIERT (keine valide Basiswert-Bestätigung)\n")
+                        return []
+
             if options:
                 print(f"      ✅ {len(options)} Optionsscheine geparst")
                 if found_underlyings:
@@ -1383,20 +1522,26 @@ class INGOptionsFinder:
         all_options = []
         success = False
         attempted_urls = []
-        
+
+        print("\n   🔗 Onvista-URLs für Gegenprüfung (alle Varianten):")
+        for underlying in underlying_names:
+            url_variants = self.build_search_url_variants(underlying, option_type, strike_min, strike_max)
+            for variant_name, url in url_variants:
+                print(f"      [{underlying}] {variant_name}: {url}")
+                attempted_urls.append((f"{underlying} | {variant_name}", url))
+
         for underlying in underlying_names:
             print(f"\n   Probiere Basiswert-Name: '{underlying}'")
-            
+
             # Generiere mehrere URL-Varianten für Fallback-Strategien
             url_variants = self.build_search_url_variants(underlying, option_type, strike_min, strike_max)
-            attempted_urls.extend(url_variants)
-            
+
             for variant_name, url in url_variants:
                 print(f"      Versuche {variant_name}...", end=" ")
                 # WICHTIG: Übergebe expected_underlying für Validierung!
-                options = self.scrape_options(url, expected_underlying=underlying, 
+                options = self.scrape_options(url, expected_underlying=underlying,
                                             debug=(debug and len(all_options) == 0 and variant_name.startswith("Standard")))
-                
+
                 if options:
                     print(f"✅ {len(options)} gefunden")
                     all_options.extend(options)
@@ -1404,13 +1549,13 @@ class INGOptionsFinder:
                     break  # Erfolg mit diesem Basiswert, gehe zu nächstem Basiswert
                 else:
                     print("⚠️ Keine Ergebnisse")
-            
+
             if success:
                 print(f"   ✅ {len(all_options)} Optionsscheine mit '{underlying}' insgesamt gefunden")
                 break  # Erfolg, keine weiteren Basiswert-Varianten nötig
             else:
                 print(f"   ⚠️ Alle Strategien für '{underlying}' fehlgeschlagen")
-        
+
         if not all_options:
             print(f"\n   ❌ Keine Optionsscheine gefunden")
             print(f"   Probierte Basiswert-Namen: {', '.join(underlying_names)}")
@@ -1689,7 +1834,7 @@ def get_tickers_dynamically() -> List[str]:
     """Hardcoded ticker list covering major sectors - Germany & USA"""
     return [
         # ===== INDICES =====
-        "^GDAXI", "^NDX", "^GSPC", "^STOXX50E",
+        "^GDAXI", "^NDX", "^GSPC", "^STOXX50E", "^DJI", "^FTSE", "^N225",
         
         # ===== GERMANY: Technology =====
         "SAP.DE", "SIE.DE", "IFX.DE", "ASML.AS", "SY1.DE",
@@ -1716,49 +1861,53 @@ def get_tickers_dynamically() -> List[str]:
         "BAS.DE", "LIN.DE", "1COV.DE",
         
         # ===== USA: Technology (Mega Cap) =====
-        "AAPL", "MSFT", "GOOGL", "NVDA", "META", "AMZN",
+        "AAPL", "MSFT", "GOOGL", "NVDA", "META", "AMZN", "ORCL", "IBM",
         
         # ===== USA: Technology (Semiconductors & Hardware) =====
-        "INTC", "AMD", "QCOM", "AVGO", "MU", "LRCX",
+        "INTC", "AMD", "QCOM", "AVGO", "MU", "LRCX", "TXN", "AMAT",
         
         # ===== USA: Software & Cloud =====
-        "ADBE", "CRM", "NFLX", "CSCO", "WDAY", "VEEV",
+        "ADBE", "CRM", "NFLX", "CSCO", "WDAY", "VEEV", "NOW", "PANW",
         
         # ===== USA: Healthcare (Pharma & Biotech) =====
-        "JNJ", "PFE", "UNH", "MRK", "ABBV", "AMGN",
+        "JNJ", "PFE", "UNH", "MRK", "ABBV", "AMGN", "LLY", "NVO",
         
         # ===== USA: Healthcare (Medical Devices) =====
         "TMO", "EW", "BSX", "ABT", "ISRG",
         
         # ===== USA: Financials (Banks) =====
-        "JPM", "BAC", "WFC", "C", "GS", "MS",
+        "JPM", "BAC", "WFC", "C", "GS", "MS", "BLK", "SCHW",
         
         # ===== USA: Financials (Insurance) =====
         "BRK-B", "AIG", "ALL", "PGR",
         
         # ===== USA: Energy & Oil =====
-        "XOM", "CVX", "COP", "MPC", "PSX",
+        "XOM", "CVX", "COP", "MPC", "PSX", "SLB",
         
         # ===== USA: Industrials & Manufacturing =====
         "BA", "CAT", "MMM", "RTX", "GE", "HON",
         
         # ===== USA: Consumer Discretionary =====
-        "TSLA", "MCD", "NKE", "TJX", "COST", "HD",
+        "TSLA", "MCD", "NKE", "TJX", "COST", "HD", "BKNG", "SBUX",
         
         # ===== USA: Consumer Staples =====
-        "PG", "KO", "MO", "PM", "WMT", "PEP",
+        "PG", "KO", "MO", "PM", "WMT", "PEP", "CL", "MDLZ",
         
         # ===== USA: Materials & Chemicals =====
         "NEM", "FCX", "APD", "LYB",
         
         # ===== USA: Communication Services =====
-        "T", "VZ", "DIS", "CMCSA", "CHTR",
+        "T", "VZ", "DIS", "CMCSA", "CHTR", "TMUS",
         
         # ===== USA: Utilities & Infrastructure =====
         "NEE", "DUK", "SO", "EXC", "D",
         
         # ===== USA: Real Estate (REITs) =====
-        "PLD", "AMT", "CCI", "EQIX", "PSA"
+        "PLD", "AMT", "CCI", "EQIX", "PSA",
+
+        # ===== EUROPE: Additional Big Players =====
+        "MC.PA", "AIR.PA", "SU.PA", "SAN.PA", "TTE.PA", "RMS.PA", "SHEL",
+        "NESN.SW", "NOVN.SW", "ROG.SW"
     ]
 
 
