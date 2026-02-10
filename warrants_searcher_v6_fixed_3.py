@@ -9,6 +9,7 @@ import time
 from datetime import datetime, timedelta
 import re
 from typing import List, Dict, Optional
+from difflib import SequenceMatcher
 
 # ================================
 # TEIL 1: BASISWERT-CHECKER
@@ -533,18 +534,32 @@ class INGOptionsFinder:
         return t
 
     def _matches_expected_string(self, expected: str, actual: str) -> bool:
-        """Compare two strings with normalized substring and relaxed fuzzy matching (60%)."""
+        """Strikter String-Match für Basiswerte (vermeidet False Positives)."""
         if not expected or not actual:
             return False
+
         e = self._normalize_name(expected)
         a = self._normalize_name(actual)
         if not e or not a:
             return False
-        if e in a or a in e:
+
+        # Direct exact / containment matches first
+        if e == a or e in a or a in e:
             return True
-        # simple fuzzy: proportion of identical chars over max length
-        matches = sum(1 for x, y in zip(e, a) if x == y)
-        return (matches / max(len(e), len(a))) >= 0.6
+
+        # For very short expected values (e.g. ticker-like) require exact token hit
+        if len(e) <= 4:
+            return e in set(a.split())
+
+        e_tokens = {tok for tok in e.split() if len(tok) >= 3}
+        a_tokens = {tok for tok in a.split() if len(tok) >= 3}
+        if e_tokens and a_tokens:
+            overlap = len(e_tokens & a_tokens) / max(len(e_tokens), 1)
+            if overlap >= 0.6:
+                return True
+
+        # Fallback fuzzy check only for longer names
+        return SequenceMatcher(None, e, a).ratio() >= 0.82
     
     def extract_underlying_from_cells(self, cells: List, col_index: int = 1) -> str:
         """Extrahiere den Basiswert aus einer gegebenen Spalte (default 1)."""
@@ -860,6 +875,39 @@ class INGOptionsFinder:
         for label, url in urls_with_labels:
             print(f"      - {label}: {url}")
     
+    def _extract_product_underlying(self, html_text: str) -> str:
+        """Extrahiere Basiswert von einer Produktseite (falls vorhanden)."""
+        if not html_text:
+            return ""
+
+        soup = BeautifulSoup(html_text, 'html.parser')
+
+        # Häufiges Muster: Tabelle/Key-Value mit Label "Basiswert"
+        for row in soup.find_all(['tr', 'li', 'div']):
+            text = row.get_text(" ", strip=True)
+            if not text:
+                continue
+            if "basiswert" in text.lower() and len(text) < 200:
+                parts = re.split(r"basiswert\s*:?", text, flags=re.IGNORECASE)
+                if len(parts) > 1:
+                    candidate = parts[-1].strip(' -:|')
+                    if candidate:
+                        return candidate
+
+        # Fallback: Suche strukturierte Elemente
+        labels = soup.find_all(string=re.compile(r"Basiswert", re.IGNORECASE))
+        for label in labels:
+            parent = label.parent
+            if not parent:
+                continue
+            sibling = parent.find_next(['td', 'dd', 'span'])
+            if sibling:
+                candidate = sibling.get_text(" ", strip=True)
+                if candidate:
+                    return candidate
+
+        return ""
+
     def scrape_options(self, url: str, expected_underlying: str = "", debug: bool = False, retry_count: int = 0) -> List[Dict]:
         """Scrape Optionsscheine von onvista mit Retry-Logik und Basiswert-Validierung"""
         options = []
@@ -951,12 +999,13 @@ class INGOptionsFinder:
                 if underlying_col is None:
                     matching = False
 
-                # If no direct match found in the table, try a lightweight product-page confirmation
+                # If no direct match found in the table, verify via product pages
                 if not matching:
-                    expected_norm = self._normalize_name(expected_underlying)
-                    # Try up to 5 product links from the table to confirm underlying
                     confirmed = False
-                    for row in rows[1: min(6, len(rows))]:
+                    confirmed_underlyings = set()
+
+                    # Try up to 6 product links from the table to confirm exact basiswert
+                    for row in rows[1: min(7, len(rows))]:
                         cells = row.find_all('td')
                         if not cells:
                             continue
@@ -965,32 +1014,35 @@ class INGOptionsFinder:
                         if not a or not a.get('href'):
                             continue
                         href = a.get('href')
-                        # Build absolute URL
                         if href.startswith('/'):
                             href = 'https://www.onvista.de' + href
                         try:
                             r = self.session.get(href, timeout=8)
                             if r.status_code != 200:
                                 continue
-                            page_text = r.text
-                            page_norm = self._normalize_name(page_text)
-                            if expected_norm in page_norm:
-                                confirmed = True
-                                break
+                            product_underlying = self._extract_product_underlying(r.text)
+                            if product_underlying:
+                                confirmed_underlyings.add(product_underlying)
+                                if self._matches_expected_string(expected_underlying, product_underlying):
+                                    confirmed = True
+                                    break
                         except Exception:
                             continue
 
-                    if not confirmed and found_underlyings:
-                        print(f"\n      ⚠️ WARNUNG: Suche nach '{expected_underlying}'")
-                        print(f"      ABER Tabelle enthält: {', '.join(list(found_underlyings)[:5])}")
-                        print(f"      → {len(options)} Optionsscheine werden IGNORIERT (falsche Underlyings)\n")
-                        return []  # Keine falschen Warrants zurückgeben!
                     if confirmed:
-                        # confirmed via product page — proceed but log it
-                        print(f"\n      ✅ Produkt-Seiten bestätigen Ergebnisse für '{expected_underlying}' — parsing trotz fehlender Spalte")
-                    elif underlying_col is None and not found_underlyings:
-                        print(f"\n      ⚠️ Basiswert-Spalte fehlt — Ergebnisse ohne Tabellen-Validierung")
-            
+                        print(f"\n      ✅ Produkt-Seiten bestätigen Basiswert '{expected_underlying}'")
+                    else:
+                        if confirmed_underlyings:
+                            print(f"\n      ⚠️ WARNUNG: Suche nach '{expected_underlying}'")
+                            print(f"      Produktseiten zeigen stattdessen: {', '.join(list(confirmed_underlyings)[:5])}")
+                        elif found_underlyings:
+                            print(f"\n      ⚠️ WARNUNG: Suche nach '{expected_underlying}'")
+                            print(f"      Tabelle enthält: {', '.join(list(found_underlyings)[:5])}")
+                        else:
+                            print(f"\n      ⚠️ Basiswert konnte nicht verifiziert werden: '{expected_underlying}'")
+                        print(f"      → {len(options)} Optionsscheine werden IGNORIERT (keine valide Basiswert-Bestätigung)\n")
+                        return []
+
             if options:
                 print(f"      ✅ {len(options)} Optionsscheine geparst")
                 if found_underlyings:
@@ -1470,20 +1522,26 @@ class INGOptionsFinder:
         all_options = []
         success = False
         attempted_urls = []
-        
+
+        print("\n   🔗 Onvista-URLs für Gegenprüfung (alle Varianten):")
+        for underlying in underlying_names:
+            url_variants = self.build_search_url_variants(underlying, option_type, strike_min, strike_max)
+            for variant_name, url in url_variants:
+                print(f"      [{underlying}] {variant_name}: {url}")
+                attempted_urls.append((f"{underlying} | {variant_name}", url))
+
         for underlying in underlying_names:
             print(f"\n   Probiere Basiswert-Name: '{underlying}'")
-            
+
             # Generiere mehrere URL-Varianten für Fallback-Strategien
             url_variants = self.build_search_url_variants(underlying, option_type, strike_min, strike_max)
-            attempted_urls.extend(url_variants)
-            
+
             for variant_name, url in url_variants:
                 print(f"      Versuche {variant_name}...", end=" ")
                 # WICHTIG: Übergebe expected_underlying für Validierung!
-                options = self.scrape_options(url, expected_underlying=underlying, 
+                options = self.scrape_options(url, expected_underlying=underlying,
                                             debug=(debug and len(all_options) == 0 and variant_name.startswith("Standard")))
-                
+
                 if options:
                     print(f"✅ {len(options)} gefunden")
                     all_options.extend(options)
@@ -1491,13 +1549,13 @@ class INGOptionsFinder:
                     break  # Erfolg mit diesem Basiswert, gehe zu nächstem Basiswert
                 else:
                     print("⚠️ Keine Ergebnisse")
-            
+
             if success:
                 print(f"   ✅ {len(all_options)} Optionsscheine mit '{underlying}' insgesamt gefunden")
                 break  # Erfolg, keine weiteren Basiswert-Varianten nötig
             else:
                 print(f"   ⚠️ Alle Strategien für '{underlying}' fehlgeschlagen")
-        
+
         if not all_options:
             print(f"\n   ❌ Keine Optionsscheine gefunden")
             print(f"   Probierte Basiswert-Namen: {', '.join(underlying_names)}")
