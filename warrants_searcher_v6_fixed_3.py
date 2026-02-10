@@ -3,6 +3,8 @@ import pandas as pd
 import numpy as np
 import requests
 from bs4 import BeautifulSoup
+import json
+import os
 import time
 from datetime import datetime, timedelta
 import re
@@ -175,6 +177,7 @@ class INGOptionsFinder:
         self.retry_delay = 1  # Sekunden
         self.search_cache = {}  # Cache für erfolgreiche Suchen
         self.details_cache = {}  # Cache für Optionsschein-Details
+        self.mapping_cache_file = "onvista_mapping.json"
     
     def ticker_to_onvista_name(self, ticker):
         """
@@ -190,20 +193,23 @@ class INGOptionsFinder:
             cached = self.onvista_mapping[ticker]
             if cached:  # Nicht leere Liste
                 return cached
+
+        # Automatische Ableitung über yfinance (Big-Player + neue Ticker)
+        auto_variants = self._generate_variants_from_yfinance(ticker)
+        if auto_variants:
+            self.onvista_mapping[ticker] = auto_variants
+            self._save_onvista_mapping(self.onvista_mapping)
+            return auto_variants
         
         # Fallback: Generiere Namen-Varianten
         return self._generate_name_variants(ticker)
     
     def _load_onvista_mapping(self) -> Dict[str, List[str]]:
         """Lade onvista Mapping aus Cache-Datei"""
-        import json
-        import os
-        
-        cache_file = "onvista_mapping.json"
-        
+
         try:
-            if os.path.exists(cache_file):
-                with open(cache_file, 'r') as f:
+            if os.path.exists(self.mapping_cache_file):
+                with open(self.mapping_cache_file, 'r', encoding='utf-8') as f:
                     mapping = json.load(f)
                     print(f"   📦 Onvista-Mapping geladen: {len(mapping)} Ticker")
                     return mapping
@@ -216,6 +222,87 @@ class INGOptionsFinder:
             "^NDX": ["NASDAQ-100"],
             "^GSPC": ["S-P-500"]
         }
+
+    def _save_onvista_mapping(self, mapping: Dict[str, List[str]]) -> None:
+        """Speichere aktualisiertes Mapping in Cache-Datei."""
+        try:
+            with open(self.mapping_cache_file, 'w', encoding='utf-8') as f:
+                json.dump(mapping, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _slugify_name(name: str) -> str:
+        """Konvertiere beliebige Namen in onvista-ähnliche URL-Slug-Form."""
+        if not name:
+            return ""
+
+        replacements = {
+            "&": " and ",
+            "/": " ",
+            ",": " ",
+            ".": " ",
+            "'": " ",
+            "’": " ",
+            "–": "-",
+            "—": "-",
+        }
+        normalized = name
+        for old, new in replacements.items():
+            normalized = normalized.replace(old, new)
+
+        normalized = re.sub(r"\s+", " ", normalized.strip())
+        normalized = normalized.replace(" ", "-")
+        normalized = re.sub(r"-+", "-", normalized)
+        return normalized.strip("-")
+
+    def _generate_variants_from_yfinance(self, ticker: str) -> List[str]:
+        """Erzeuge onvista-Namensvarianten dynamisch aus yfinance-Infos."""
+        variants: List[str] = []
+
+        base_ticker = ticker.replace('.DE', '').replace('.US', '')
+        variants.append(base_ticker)
+
+        try:
+            info = yf.Ticker(ticker).info
+        except Exception:
+            info = {}
+
+        possible_names = [
+            info.get("shortName", ""),
+            info.get("longName", ""),
+            info.get("displayName", ""),
+            info.get("name", "")
+        ]
+
+        for name in possible_names:
+            if not name:
+                continue
+            variants.append(name)
+            variants.append(self._slugify_name(name))
+
+            cleaned = re.sub(
+                r"\b(Inc|Incorporated|Corp|Corporation|Company|PLC|N\.V\.|AG|SE|S\.A\.|Ltd|Limited|Holdings?)\b",
+                "",
+                name,
+                flags=re.IGNORECASE,
+            )
+            variants.append(cleaned.strip())
+            variants.append(self._slugify_name(cleaned))
+
+        unique_variants = []
+        seen = set()
+        for variant in variants:
+            value = variant.strip()
+            if not value:
+                continue
+            key = value.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            unique_variants.append(value)
+
+        return unique_variants[:8]
     
     def _generate_name_variants(self, ticker: str) -> List[str]:
         """Generiere Namens-Varianten wenn kein Mapping existiert"""
@@ -1689,7 +1776,7 @@ def get_tickers_dynamically() -> List[str]:
     """Hardcoded ticker list covering major sectors - Germany & USA"""
     return [
         # ===== INDICES =====
-        "^GDAXI", "^NDX", "^GSPC", "^STOXX50E",
+        "^GDAXI", "^NDX", "^GSPC", "^STOXX50E", "^DJI", "^FTSE", "^N225",
         
         # ===== GERMANY: Technology =====
         "SAP.DE", "SIE.DE", "IFX.DE", "ASML.AS", "SY1.DE",
@@ -1716,49 +1803,53 @@ def get_tickers_dynamically() -> List[str]:
         "BAS.DE", "LIN.DE", "1COV.DE",
         
         # ===== USA: Technology (Mega Cap) =====
-        "AAPL", "MSFT", "GOOGL", "NVDA", "META", "AMZN",
+        "AAPL", "MSFT", "GOOGL", "NVDA", "META", "AMZN", "ORCL", "IBM",
         
         # ===== USA: Technology (Semiconductors & Hardware) =====
-        "INTC", "AMD", "QCOM", "AVGO", "MU", "LRCX",
+        "INTC", "AMD", "QCOM", "AVGO", "MU", "LRCX", "TXN", "AMAT",
         
         # ===== USA: Software & Cloud =====
-        "ADBE", "CRM", "NFLX", "CSCO", "WDAY", "VEEV",
+        "ADBE", "CRM", "NFLX", "CSCO", "WDAY", "VEEV", "NOW", "PANW",
         
         # ===== USA: Healthcare (Pharma & Biotech) =====
-        "JNJ", "PFE", "UNH", "MRK", "ABBV", "AMGN",
+        "JNJ", "PFE", "UNH", "MRK", "ABBV", "AMGN", "LLY", "NVO",
         
         # ===== USA: Healthcare (Medical Devices) =====
         "TMO", "EW", "BSX", "ABT", "ISRG",
         
         # ===== USA: Financials (Banks) =====
-        "JPM", "BAC", "WFC", "C", "GS", "MS",
+        "JPM", "BAC", "WFC", "C", "GS", "MS", "BLK", "SCHW",
         
         # ===== USA: Financials (Insurance) =====
         "BRK-B", "AIG", "ALL", "PGR",
         
         # ===== USA: Energy & Oil =====
-        "XOM", "CVX", "COP", "MPC", "PSX",
+        "XOM", "CVX", "COP", "MPC", "PSX", "SLB",
         
         # ===== USA: Industrials & Manufacturing =====
         "BA", "CAT", "MMM", "RTX", "GE", "HON",
         
         # ===== USA: Consumer Discretionary =====
-        "TSLA", "MCD", "NKE", "TJX", "COST", "HD",
+        "TSLA", "MCD", "NKE", "TJX", "COST", "HD", "BKNG", "SBUX",
         
         # ===== USA: Consumer Staples =====
-        "PG", "KO", "MO", "PM", "WMT", "PEP",
+        "PG", "KO", "MO", "PM", "WMT", "PEP", "CL", "MDLZ",
         
         # ===== USA: Materials & Chemicals =====
         "NEM", "FCX", "APD", "LYB",
         
         # ===== USA: Communication Services =====
-        "T", "VZ", "DIS", "CMCSA", "CHTR",
+        "T", "VZ", "DIS", "CMCSA", "CHTR", "TMUS",
         
         # ===== USA: Utilities & Infrastructure =====
         "NEE", "DUK", "SO", "EXC", "D",
         
         # ===== USA: Real Estate (REITs) =====
-        "PLD", "AMT", "CCI", "EQIX", "PSA"
+        "PLD", "AMT", "CCI", "EQIX", "PSA",
+
+        # ===== EUROPE: Additional Big Players =====
+        "MC.PA", "AIR.PA", "SU.PA", "SAN.PA", "TTE.PA", "RMS.PA", "SHEL",
+        "NESN.SW", "NOVN.SW", "ROG.SW"
     ]
 
 
