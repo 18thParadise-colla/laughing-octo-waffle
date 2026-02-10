@@ -1692,7 +1692,7 @@ def get_tickers_dynamically() -> List[str]:
         "^GDAXI", "^NDX", "^GSPC", "^STOXX50E",
         
         # ===== GERMANY: Technology =====
-        "SAP.DE", "SIE.DE", "IFX.DE", "ASML.AS",
+        "SAP.DE", "SIE.DE", "IFX.DE", "ASML.AS", "SY1.DE",
         
         # ===== GERMANY: Healthcare =====
         "BAYN.DE", "MRK.DE", "FRE.DE", "CBK.DE",
@@ -1708,6 +1708,9 @@ def get_tickers_dynamically() -> List[str]:
         
         # ===== GERMANY: Consumer & Retail =====
         "BMW.DE", "MBG.DE", "ADS.DE", "PUM.DE", "DHL.DE",
+
+        # ===== GERMANY / FRANCE: Additional Europe Large Caps =====
+        "ENR.DE", "OR.PA",
         
         # ===== GERMANY: Materials & Chemicals =====
         "BAS.DE", "LIN.DE", "1COV.DE",
