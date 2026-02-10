@@ -6,10 +6,12 @@ from bs4 import BeautifulSoup
 import json
 import os
 import time
+import smtplib
 from datetime import datetime, timedelta
 import re
 from typing import List, Dict, Optional
 from difflib import SequenceMatcher
+from email.message import EmailMessage
 
 # ================================
 # TEIL 1: BASISWERT-CHECKER
@@ -1778,33 +1780,41 @@ def run_complete_analysis(tickers, min_score=7):
 
     df_final = add_position_sizing(df_final, investment_eur=200.0, stop_loss_pct=0.10)
     final_top3 = df_final.head(3)
+    final_lines = []
 
     for i, (_, opt) in enumerate(final_top3.iterrows(), 1):
-        print(f"\n{i}. RANG - {opt['ticker']} CALL | WKN: {opt['wkn']}")
-        print(f"   {'─'*76}")
-        print(f"   Gesamt-Score: {opt['gesamt_score']}/115 ⭐")
-        print(f"   Strike: {opt['basispreis']} | Kurs: {opt['brief']:.3f} EUR | Abweichung: {opt['strike_abweichung_pct']:.1f}%")
-        print(f"   Omega: {opt['omega']:.1f} | Hebel: {opt['hebel']:.1f} | Spread: {opt['spread_pct']:.2f}%")
-        print(f"   Laufzeit: {opt['tage_laufzeit']} Tage | Impl.Vola: {opt['impl_vola']:.1f}% | Aufgeld: {opt['aufgeld_pct']:.1f}%")
-        print(f"   Zeitwertverlust: {opt['theta_pro_tag']:.4f} EUR/Tag ({opt['theta_pct_pro_tag']:.1f}%/Tag)")
-        print(f"   Break-Even: {opt['breakeven']:.2f} EUR (benötigt {opt['move_needed_pct']:+.1f}% Bewegung)")
-        print(f"   Innerer Wert: {opt['intrinsic_value']:.3f} EUR | Zeitwert: {opt['extrinsic_value']:.3f} EUR ({opt['extrinsic_pct']:.0f}%)")
-        print(f"   Asset-Score: {opt['asset_score']}/12 | Emittent: {opt['emittent']}")
-        print(f"   ├─ Spread-Score: {opt['spread_score']}/25 | Omega-Score: {opt['omega_score']}/25")
-        print(f"   ├─ Strike-Score: {opt['strike_score']}/20 | Theta-Score: {opt['theta_score']}/15")
-        print(f"   ├─ Vola-Score: {opt['vola_score']}/10 | Aufgeld-Score: {opt['aufgeld_score']}/5")
-        print(f"   ├─ Break-Even-Score: {opt['breakeven_score']}/10 | Leverage-Score: {opt['leverage_score']}/5")
-        print(f"   {format_stakeholder_note(opt)}")
-        print(f"   {format_pl_simulation(opt)}")
-        print(
-            "   200€-Setup (Stop 10%): "
-            f"Stück {int(opt['order_qty'])} | "
-            f"Entry {opt['entry_price_eur']:.3f}€ | "
-            f"Stop {opt['stop_price_eur']:.3f}€ | "
-            f"Kosten {opt['total_cost_eur']:.2f}€ | "
-            f"Rest {opt['cash_left_eur']:.2f}€ | "
-            f"Risiko {opt['risk_to_stop_eur']:.2f}€"
-        )
+        option_lines = [
+            f"\n{i}. RANG - {opt['ticker']} CALL | WKN: {opt['wkn']}",
+            f"   {'─'*76}",
+            f"   Gesamt-Score: {opt['gesamt_score']}/115 ⭐",
+            f"   Strike: {opt['basispreis']} | Kurs: {opt['brief']:.3f} EUR | Abweichung: {opt['strike_abweichung_pct']:.1f}%",
+            f"   Omega: {opt['omega']:.1f} | Hebel: {opt['hebel']:.1f} | Spread: {opt['spread_pct']:.2f}%",
+            f"   Laufzeit: {opt['tage_laufzeit']} Tage | Impl.Vola: {opt['impl_vola']:.1f}% | Aufgeld: {opt['aufgeld_pct']:.1f}%",
+            f"   Zeitwertverlust: {opt['theta_pro_tag']:.4f} EUR/Tag ({opt['theta_pct_pro_tag']:.1f}%/Tag)",
+            f"   Break-Even: {opt['breakeven']:.2f} EUR (benötigt {opt['move_needed_pct']:+.1f}% Bewegung)",
+            f"   Innerer Wert: {opt['intrinsic_value']:.3f} EUR | Zeitwert: {opt['extrinsic_value']:.3f} EUR ({opt['extrinsic_pct']:.0f}%)",
+            f"   Asset-Score: {opt['asset_score']}/12 | Emittent: {opt['emittent']}",
+            f"   ├─ Spread-Score: {opt['spread_score']}/25 | Omega-Score: {opt['omega_score']}/25",
+            f"   ├─ Strike-Score: {opt['strike_score']}/20 | Theta-Score: {opt['theta_score']}/15",
+            f"   ├─ Vola-Score: {opt['vola_score']}/10 | Aufgeld-Score: {opt['aufgeld_score']}/5",
+            f"   ├─ Break-Even-Score: {opt['breakeven_score']}/10 | Leverage-Score: {opt['leverage_score']}/5",
+            f"   {format_stakeholder_note(opt)}",
+            f"   {format_pl_simulation(opt)}",
+            (
+                "   200€-Setup (Stop 10%): "
+                f"Stück {int(opt['order_qty'])} | "
+                f"Entry {opt['entry_price_eur']:.3f}€ | "
+                f"Stop {opt['stop_price_eur']:.3f}€ | "
+                f"Kosten {opt['total_cost_eur']:.2f}€ | "
+                f"Rest {opt['cash_left_eur']:.2f}€ | "
+                f"Risiko {opt['risk_to_stop_eur']:.2f}€"
+            )
+        ]
+        final_lines.extend(option_lines)
+        for line in option_lines:
+            print(line)
+
+    send_top3_email("\n".join(final_lines))
     
     # Export
     output_file = 'top_optionsscheine_ing.csv'
@@ -1824,6 +1834,47 @@ def run_complete_analysis(tickers, min_score=7):
     print(f"Ø Theta pro Tag: {df_final['theta_pct_pro_tag'].mean():.2f}%")
     
     return df_final
+
+
+def send_top3_email(top3_text: str) -> None:
+    """Sendet den finalen Top-3-Output optional per SMTP-Mail."""
+    recipient = os.getenv("TOP3_EMAIL_TO")
+    if not recipient:
+        print("ℹ️ Kein Mail-Empfänger gesetzt (TOP3_EMAIL_TO) – Mailversand übersprungen.")
+        return
+
+    smtp_host = os.getenv("TOP3_SMTP_HOST", "smtp.gmail.com")
+    smtp_port = int(os.getenv("TOP3_SMTP_PORT", "587"))
+    smtp_user = os.getenv("TOP3_SMTP_USER", "")
+    smtp_password = os.getenv("TOP3_SMTP_PASSWORD", "")
+    sender = os.getenv("TOP3_EMAIL_FROM", smtp_user or recipient)
+    use_tls = os.getenv("TOP3_SMTP_USE_TLS", "1").strip().lower() not in {"0", "false", "no"}
+
+    if not smtp_user or not smtp_password:
+        print("⚠️ SMTP-Login unvollständig (TOP3_SMTP_USER/TOP3_SMTP_PASSWORD) – Mailversand übersprungen.")
+        return
+
+    message = EmailMessage()
+    message["Subject"] = f"Top 3 Optionsscheine - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+    message["From"] = sender
+    message["To"] = recipient
+    message.set_content(
+        "Automatischer Lauf des Optionsschein-Scanners.\n"
+        "Hier ist der gleiche Top-3-Output wie in der Konsole:\n\n"
+        f"{top3_text}\n"
+    )
+
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=20) as smtp:
+            smtp.ehlo()
+            if use_tls:
+                smtp.starttls()
+                smtp.ehlo()
+            smtp.login(smtp_user, smtp_password)
+            smtp.send_message(message)
+        print(f"📧 Top-3-Mail erfolgreich gesendet an: {recipient}")
+    except Exception as exc:
+        print(f"⚠️ Mailversand fehlgeschlagen: {exc}")
 
 
 # ================================

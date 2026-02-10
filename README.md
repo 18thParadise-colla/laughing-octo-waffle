@@ -174,6 +174,32 @@ Zusätzlich gibt das Skript eine **Positionsgröße für 200€ Einsatz** aus (m
 
 ---
 
+
+## Mailversand der finalen Top 3 (für Cronjobs)
+
+Das Skript kann nach dem Konsolen-Output optional eine Mail mit genau den finalen **Top 3 Optionsscheinen** senden.
+
+Dafür folgende Umgebungsvariablen setzen:
+
+```bash
+export TOP3_EMAIL_TO=dein.empfaenger@example.com
+export TOP3_SMTP_HOST=smtp.gmail.com
+export TOP3_SMTP_PORT=587
+export TOP3_SMTP_USER=dein.smtp.user@example.com
+export TOP3_SMTP_PASSWORD='dein-passwort-oder-app-passwort'
+# optional:
+export TOP3_EMAIL_FROM=dein.absender@example.com
+export TOP3_SMTP_USE_TLS=1
+```
+
+Wenn `TOP3_EMAIL_TO` oder SMTP-Login fehlen, wird der Mailversand sauber übersprungen und das Skript läuft normal weiter.
+
+Beispiel für `crontab` (3x pro Tag):
+
+```bash
+0 8,12,16 * * 1-5 cd /pfad/zum/repo && /usr/bin/python3 warrants_searcher_v6_fixed_3.py >> scanner.log 2>&1
+```
+
 ## Anpassungsideen (falls du erweitern willst)
 
 - Andere Laufzeiten (z. B. 20–30 Tage) ermöglichen
