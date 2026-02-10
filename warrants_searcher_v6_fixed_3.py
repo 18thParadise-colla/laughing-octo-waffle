@@ -370,6 +370,9 @@ class INGOptionsFinder:
 
         exact_map = {
             "MRK.DE": ["Merck-KGaA"],  # Deutsche Merck
+            "SY1.DE": ["Symrise"],
+            "ENR.DE": ["Siemens-Energy", "Siemens Energy"],
+            "OR.PA": ["L-Oreal", "L Oreal"],
         }
 
         if ticker in exact_map:
@@ -761,6 +764,14 @@ class INGOptionsFinder:
                                          days_min=8, days_max=20, broker_filter=False)))
         
         return urls
+
+    def print_manual_check_urls(self, urls_with_labels: List) -> None:
+        """Zeige absolute Such-URLs für manuellen Browser-Check."""
+        if not urls_with_labels:
+            return
+        print("   🔗 Manuelle Check-URLs:")
+        for label, url in urls_with_labels:
+            print(f"      - {label}: {url}")
     
     def scrape_options(self, url: str, expected_underlying: str = "", debug: bool = False, retry_count: int = 0) -> List[Dict]:
         """Scrape Optionsscheine von onvista mit Retry-Logik und Basiswert-Validierung"""
@@ -1371,12 +1382,14 @@ class INGOptionsFinder:
         # Probiere verschiedene Namensvarianten
         all_options = []
         success = False
+        attempted_urls = []
         
         for underlying in underlying_names:
             print(f"\n   Probiere Basiswert-Name: '{underlying}'")
             
             # Generiere mehrere URL-Varianten für Fallback-Strategien
             url_variants = self.build_search_url_variants(underlying, option_type, strike_min, strike_max)
+            attempted_urls.extend(url_variants)
             
             for variant_name, url in url_variants:
                 print(f"      Versuche {variant_name}...", end=" ")
@@ -1403,6 +1416,7 @@ class INGOptionsFinder:
             print(f"   Probierte Basiswert-Namen: {', '.join(underlying_names)}")
             print(f"   Probierte Strategien: Standard, Erweitert, Fallback, Erweiterte Strikes")
             print(f"   💡 Tipp: Prüfe manuell auf onvista.de, wie der Basiswert geschrieben wird")
+            self.print_manual_check_urls(attempted_urls)
             return pd.DataFrame()
         
         # Vorfilter für Details (reduziert Requests)
@@ -1416,6 +1430,7 @@ class INGOptionsFinder:
 
         if not prefiltered:
             print(f"   ❌ Keine Optionsscheine nach Qualitätsfilter übrig (von {len(all_options)})")
+            self.print_manual_check_urls(attempted_urls)
             return pd.DataFrame()
 
         self.enrich_options_with_details(prefiltered)
@@ -1437,6 +1452,7 @@ class INGOptionsFinder:
         
         if df.empty:
             print(f"   ❌ Keine Optionsscheine nach Qualitätsfilter übrig (von {original_count})")
+            self.print_manual_check_urls(attempted_urls)
             return pd.DataFrame()
         
         # Sortiere nach Gesamt-Score
@@ -1676,7 +1692,7 @@ def get_tickers_dynamically() -> List[str]:
         "^GDAXI", "^NDX", "^GSPC", "^STOXX50E",
         
         # ===== GERMANY: Technology =====
-        "SAP.DE", "SIE.DE", "IFX.DE", "ASML.AS",
+        "SAP.DE", "SIE.DE", "IFX.DE", "ASML.AS", "SY1.DE",
         
         # ===== GERMANY: Healthcare =====
         "BAYN.DE", "MRK.DE", "FRE.DE", "CBK.DE",
@@ -1692,6 +1708,9 @@ def get_tickers_dynamically() -> List[str]:
         
         # ===== GERMANY: Consumer & Retail =====
         "BMW.DE", "MBG.DE", "ADS.DE", "PUM.DE", "DHL.DE",
+
+        # ===== GERMANY / FRANCE: Additional Europe Large Caps =====
+        "ENR.DE", "OR.PA",
         
         # ===== GERMANY: Materials & Chemicals =====
         "BAS.DE", "LIN.DE", "1COV.DE",
