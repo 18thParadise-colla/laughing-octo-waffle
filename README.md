@@ -213,3 +213,30 @@ Beispiel für `crontab` (3x pro Tag):
 
 - **`warrants_searcher_v6_fixed_3.py`** → Komplettes Skript (Basiswert‑Check, Onvista‑Scraping, Scoring)
 - **`top_optionsscheine_ing.csv`** → Output der letzten Analyse (wird beim Lauf überschrieben)
+
+## Trading-Logbuch Dashboard (neu)
+
+Zusätzlich gibt es jetzt ein kleines **Web-Dashboard** für die Nachbetrachtung deiner Trades:
+
+- Datei: `dashboard/index.html`
+- Funktionen:
+  - JSON-Upload (ein Objekt oder Array)
+  - Persistenz im Browser (`localStorage`)
+  - KPI-Kacheln (z. B. Ø Score, Ø Spread, Ø Theta/Tag, Ø Risiko)
+  - Tabellenansicht inkl. Stakeholder-Info
+  - Beispiel-Datensatz per Klick (deine zwei Beispiel-Optionsscheine)
+
+### Start
+
+Einfach lokal im Browser öffnen:
+
+```bash
+xdg-open dashboard/index.html
+```
+
+oder auf einem kleinen lokalen Server:
+
+```bash
+python -m http.server 8000
+# dann http://localhost:8000/dashboard/index.html
+```

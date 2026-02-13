@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Trading Logbuch – Optionsscheine</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="header">
+      <h1>Trading Logbuch</h1>
+      <p>JSON hochladen, Trades nachverfolgen und aus Fehlern lernen.</p>
+    </header>
+
+    <main class="layout">
+      <section class="card controls">
+        <h2>Import</h2>
+        <p>Unterstützt Einzelobjekt oder Array aus Trades.</p>
+        <input id="jsonFile" type="file" accept="application/json" />
+        <div class="button-row">
+          <button id="loadSampleBtn" type="button">Beispiel laden</button>
+          <button id="clearBtn" type="button" class="danger">Logbuch löschen</button>
+        </div>
+        <details>
+          <summary>Erwartetes JSON-Schema</summary>
+          <pre id="schemaPreview"></pre>
+        </details>
+      </section>
+
+      <section class="card metrics">
+        <h2>Dashboard</h2>
+        <div class="stats-grid">
+          <article><h3>Trades</h3><strong id="statTrades">0</strong></article>
+          <article><h3>Ø Score</h3><strong id="statAvgScore">0</strong></article>
+          <article><h3>Ø Spread</h3><strong id="statAvgSpread">0%</strong></article>
+          <article><h3>Ø Theta/Tag</h3><strong id="statAvgTheta">0%</strong></article>
+          <article><h3>Top Emittent</h3><strong id="statBestIssuer">-</strong></article>
+          <article><h3>Ø Risiko (200€)</h3><strong id="statAvgRisk">0€</strong></article>
+        </div>
+      </section>
+
+      <section class="card full-width">
+        <h2>Trade-Übersicht</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Rang</th>
+                <th>Name</th>
+                <th>WKN</th>
+                <th>Score</th>
+                <th>Spread</th>
+                <th>Omega</th>
+                <th>Break-Even Move</th>
+                <th>Theta/Tag</th>
+                <th>Emittent</th>
+                <th>Stakeholder-Info</th>
+              </tr>
+            </thead>
+            <tbody id="tradesTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <template id="rowTemplate">
+      <tr>
+        <td data-key="rank"></td>
+        <td data-key="name"></td>
+        <td data-key="wkn"></td>
+        <td data-key="score"></td>
+        <td data-key="spread"></td>
+        <td data-key="omega"></td>
+        <td data-key="breakEvenMove"></td>
+        <td data-key="thetaPerDay"></td>
+        <td data-key="issuer"></td>
+        <td data-key="stakeholderInfo"></td>
+      </tr>
+    </template>
+
+    <script src="app.js"></script>
+  </body>
+</html>
