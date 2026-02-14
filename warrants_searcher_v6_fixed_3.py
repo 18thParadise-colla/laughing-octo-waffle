@@ -2,6 +2,7 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import requests
+import argparse
 from bs4 import BeautifulSoup
 import json
 import os
@@ -1724,7 +1725,7 @@ class INGOptionsFinder:
 # TEIL 3: HAUPT-ANALYSE
 # ================================
 
-def run_complete_analysis(tickers, min_score=7):
+def run_complete_analysis(tickers, min_score=7, basiswert_only=False):
     """
     Vollständige Analyse:
     1. Prüfe alle Basiswerte
@@ -1732,9 +1733,13 @@ def run_complete_analysis(tickers, min_score=7):
     """
     
     print("=" * 80)
-    print("🎯 BASISWERT-ANALYSE & OPTIONSSCHEIN-FINDER")
+    if basiswert_only:
+        print("🎯 BASISWERT-ANALYSE")
+    else:
+        print("🎯 BASISWERT-ANALYSE & OPTIONSSCHEIN-FINDER")
     print("=" * 80)
-    print(f"Suche: ING-handelbare Optionsscheine mit 9-16 Tagen Laufzeit")
+    if not basiswert_only:
+        print("Suche: ING-handelbare Optionsscheine mit 9-16 Tagen Laufzeit")
     print(f"Min. Asset-Score: {min_score}")
     print("=" * 80)
     
@@ -1768,6 +1773,10 @@ def run_complete_analysis(tickers, min_score=7):
     
     print(f"\n✅ {len(df_qualified)} qualifizierte Basiswerte gefunden:\n")
     print(df_qualified[["Ticker", "Score", "Close", "ATR_%", "Long_Strike", "Short_Strike"]].to_string(index=False))
+
+    if basiswert_only:
+        print("\nℹ️ --basiswert aktiv: Analyse endet nach dem Basiswert-Check.")
+        return df_qualified
     
     # ===== SCHRITT 2: Top 3 Optionsscheine finden =====
     print("\n\n🎯 SCHRITT 2: Finde Top 3 Optionsscheine pro Basiswert")
@@ -2073,6 +2082,15 @@ def get_tickers_dynamically() -> List[str]:
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Basiswert-Analyse und optionaler Optionsschein-Scan"
+    )
+    parser.add_argument(
+        "--basiswert",
+        action="store_true",
+        help="Stoppt nach dem Basiswert-Check (ohne Optionsschein-Ausgabe)."
+    )
+    args = parser.parse_args()
     
     # ===== HOLE TICKER =====
     TICKERS = get_tickers_dynamically()
@@ -2084,7 +2102,11 @@ if __name__ == "__main__":
     print("=" * 80)
     
     # ===== FÜHRE ANALYSE AUS =====
-    df_results = run_complete_analysis(TICKERS, min_score=12)
+    df_results = run_complete_analysis(
+        TICKERS,
+        min_score=12,
+        basiswert_only=args.basiswert
+    )
     
     print("\n" + "=" * 80)
     print("✅ ANALYSE ABGESCHLOSSEN")
