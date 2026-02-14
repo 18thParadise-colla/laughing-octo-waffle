@@ -40,6 +40,96 @@ def calculate_recent_volatility(df, window=14):
     recent_returns = df["Close"].pct_change()
     return recent_returns.rolling(window).std() * 100
 
+
+def _ticker_to_stockanalysis_symbol(ticker: str) -> Optional[str]:
+    """Map yfinance ticker to stockanalysis URL symbol when possible."""
+    if not ticker:
+        return None
+
+    clean = ticker.strip().upper()
+    if clean.startswith("^"):
+        return None
+
+    # Stockanalysis deckt primär US-Symbole ab; internationale Suffixe skippen.
+    if "." in clean:
+        return None
+
+    return clean.lower()
+
+
+def get_stockanalysis_forecast(ticker: str, timeout: int = 8) -> Dict:
+    """Liest Forecast-Daten von stockanalysis.com für ein Ticker-Symbol."""
+    symbol = _ticker_to_stockanalysis_symbol(ticker)
+    if not symbol:
+        return {
+            "Forecast_Consensus": "N/A",
+            "Forecast_Target": None,
+            "Forecast_Upside_%": None,
+            "Forecast_Score": 0,
+            "Forecast_URL": None,
+        }
+
+    url = f"https://stockanalysis.com/stocks/{symbol}/forecast/"
+    try:
+        response = requests.get(url, timeout=timeout, headers={
+            "User-Agent": "Mozilla/5.0",
+            "Accept-Language": "en-US,en;q=0.9"
+        })
+        if response.status_code != 200:
+            return {
+                "Forecast_Consensus": "N/A",
+                "Forecast_Target": None,
+                "Forecast_Upside_%": None,
+                "Forecast_Score": 0,
+                "Forecast_URL": url,
+            }
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        text = soup.get_text(" ", strip=True)
+
+        target_match = re.search(r"Price Target:\s*\$?([0-9]+(?:\.[0-9]+)?)", text, re.IGNORECASE)
+        upside_match = re.search(r"Price Target:[^\)]*\(([+-]?[0-9]+(?:\.[0-9]+)?)%\)", text, re.IGNORECASE)
+        consensus_match = re.search(r"Analyst Consensus:\s*([A-Za-z ]+)", text, re.IGNORECASE)
+
+        target = float(target_match.group(1)) if target_match else None
+        upside = float(upside_match.group(1)) if upside_match else None
+        consensus = consensus_match.group(1).strip() if consensus_match else "N/A"
+
+        forecast_score = 0
+        consensus_l = consensus.lower()
+        if "strong buy" in consensus_l:
+            forecast_score += 2
+        elif consensus_l == "buy":
+            forecast_score += 1
+        elif "strong sell" in consensus_l:
+            forecast_score -= 2
+        elif consensus_l == "sell":
+            forecast_score -= 1
+
+        if upside is not None:
+            if upside >= 15:
+                forecast_score += 2
+            elif upside >= 5:
+                forecast_score += 1
+            elif upside < 0:
+                forecast_score -= 2
+
+        return {
+            "Forecast_Consensus": consensus,
+            "Forecast_Target": target,
+            "Forecast_Upside_%": upside,
+            "Forecast_Score": forecast_score,
+            "Forecast_URL": url,
+        }
+    except Exception:
+        return {
+            "Forecast_Consensus": "N/A",
+            "Forecast_Target": None,
+            "Forecast_Upside_%": None,
+            "Forecast_Score": 0,
+            "Forecast_URL": url,
+        }
+
 def check_basiswert(ticker, period="6mo", interval="1d"):
     """Prüfe einzelnen Basiswert"""
     df = yf.download(ticker, period=period, interval=interval, progress=False)
@@ -129,6 +219,21 @@ def check_basiswert(ticker, period="6mo", interval="1d"):
     else:
         reasons.append("✔ Genug Range, kein Seitwärtsmarkt")
 
+    # Analysten-Forecast von stockanalysis.com
+    forecast = get_stockanalysis_forecast(ticker)
+    forecast_score = forecast["Forecast_Score"]
+    score += forecast_score
+    consensus = forecast["Forecast_Consensus"]
+    upside = forecast["Forecast_Upside_%"]
+
+    if consensus != "N/A" or upside is not None:
+        upside_txt = f", Upside {upside:+.2f}%" if upside is not None else ""
+        reasons.append(
+            f"📈 Forecast: {consensus}{upside_txt} (Score {forecast_score:+d})"
+        )
+    else:
+        reasons.append("ℹ️ Forecast: keine stockanalysis-Daten verfügbar")
+
     # OS-OK
     os_ok = (
         score >= 7 and
@@ -152,6 +257,11 @@ def check_basiswert(ticker, period="6mo", interval="1d"):
         "OS_OK": os_ok,
         "Long_Strike": long_strike,
         "Short_Strike": short_strike,
+        "Forecast_Consensus": forecast["Forecast_Consensus"],
+        "Forecast_Target": forecast["Forecast_Target"],
+        "Forecast_Upside_%": forecast["Forecast_Upside_%"],
+        "Forecast_Score": forecast["Forecast_Score"],
+        "Forecast_URL": forecast["Forecast_URL"],
         "Reasoning": " | ".join(reasons)
     }
 
