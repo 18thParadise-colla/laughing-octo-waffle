@@ -1772,7 +1772,15 @@ def run_complete_analysis(tickers, min_score=7, basiswert_only=False):
         return None
     
     print(f"\n✅ {len(df_qualified)} qualifizierte Basiswerte gefunden:\n")
-    print(df_qualified[["Ticker", "Score", "Close", "ATR_%", "Long_Strike", "Short_Strike"]].to_string(index=False))
+    summary_cols = [
+        "Ticker", "Score", "Close", "ATR_%", "Long_Strike", "Short_Strike",
+        "Forecast_Consensus", "Forecast_Target", "Forecast_Upside_%", "Forecast_Score"
+    ]
+    print(df_qualified[summary_cols].to_string(index=False))
+
+    print("\n🧠 Reasoning pro Basiswert:")
+    for _, asset in df_qualified.iterrows():
+        print(f"- {asset['Ticker']}: {asset['Reasoning']}")
 
     if basiswert_only:
         print("\nℹ️ --basiswert aktiv: Analyse endet nach dem Basiswert-Check.")
