@@ -19,10 +19,10 @@ logger = logging.getLogger(__name__)
 
 
 def get_tickers_dynamically() -> list[str]:
-    # Keep the original list for now; consider moving to config file.
-    from warrants_searcher_v6_fixed_3 import get_tickers_dynamically as legacy
+    # Default list lives in the package to avoid legacy-script import cycles.
+    from warrant_scanner.tickers import get_default_tickers
 
-    return legacy()
+    return get_default_tickers()
 
 
 def run(config: ScannerConfig, tickers: list[str], option_type: str = "call", debug: bool = False) -> pd.DataFrame:
