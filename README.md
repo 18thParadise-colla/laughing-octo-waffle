@@ -14,22 +14,37 @@ Der Ablauf besteht aus drei Teilen:
 ## Installation & Start
 
 **Voraussetzungen:**
-- Python 3.9+ (empfohlen)
+- Python **3.10+** empfohlen
+- (Ubuntu/Debian) für venv: `sudo apt install python3-venv`
 
-**Abhängigkeiten installieren:**
+### Option A: Neues CLI (empfohlen)
+
+Dieses Repo wurde von einem großen Single‑File Script auf ein modulares Package refactored.
+
 ```bash
-pip install yfinance pandas numpy requests beautifulsoup4
+# im Repo
+python -m venv .venv
+. .venv/bin/activate
+pip install -U pip
+pip install -e .
+
+# schneller Testlauf (limit = weniger Ticker)
+python -m warrant_scanner.main --limit 50 --out top_options.csv
 ```
 
-**Starten:**
+### Option B: Legacy Entry Point (kompatibel)
+
 ```bash
-python warrants_searcher_v6_fixed_3.py
+python warrants_searcher_v6_fixed_3.py --limit 50 --out top_options.csv
 ```
 
-Das Skript:
-- analysiert eine feste Ticker‑Liste,
-- sucht zu qualifizierten Basiswerten die besten Optionsscheine,
-- speichert die Ergebnisse als **`top_optionsscheine_ing.csv`**.
+**Output:**
+- CSV Export: `top_options.csv` (oder via `--out`)
+
+### US-Ticker Support (Währungslogik)
+Für US Underlyings versucht der Refactor Premium/Intrinsic/Break-even **währungskonsistent** zu berechnen,
+indem FX-Raten via Yahoo (`EURUSD=X`, etc.) geladen werden. Wenn FX nicht verfügbar ist, werden einige
+Kennzahlen (z.B. Intrinsic/Extrinsic) defensiv leer gelassen statt falsch gerechnet.
 
 ---
 
