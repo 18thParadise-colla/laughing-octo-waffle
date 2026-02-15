@@ -1,0 +1,156 @@
+:root {
+  color-scheme: dark;
+  --bg: #090c12;
+  --card: #121926;
+  --text: #e8edf7;
+  --muted: #91a1bf;
+  --accent: #6ea8fe;
+  --success: #34d399;
+  --danger: #ef4444;
+  --border: #253146;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, system-ui, sans-serif;
+  background: radial-gradient(circle at top right, #18243d, var(--bg) 40%);
+  color: var(--text);
+}
+
+.header {
+  padding: 2rem 2rem 1rem;
+}
+
+.header h1 {
+  margin: 0 0 0.4rem;
+}
+
+.header p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(280px, 1fr));
+  gap: 1rem;
+  padding: 1rem 2rem 2rem;
+}
+
+.card {
+  background: color-mix(in srgb, var(--card) 95%, black);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 1rem;
+}
+
+.full-width {
+  grid-column: 1 / -1;
+}
+
+h2 {
+  margin-top: 0;
+}
+
+input[type='file'],
+button {
+  width: 100%;
+  margin-top: 0.6rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #0f1523;
+  color: var(--text);
+  padding: 0.65rem;
+}
+
+button {
+  cursor: pointer;
+  border-color: #3d5ea6;
+  background: #16274d;
+}
+
+button:hover {
+  border-color: var(--accent);
+}
+
+.button-row {
+  display: flex;
+  gap: 0.6rem;
+}
+
+button.danger {
+  background: #3a1118;
+  border-color: #7f1d1d;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(120px, 1fr));
+  gap: 0.75rem;
+}
+
+.stats-grid article {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.7rem;
+  background: #0d1420;
+}
+
+.stats-grid h3 {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.stats-grid strong {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 1.2rem;
+  color: var(--success);
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  border-bottom: 1px solid var(--border);
+  padding: 0.65rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+pre {
+  white-space: pre-wrap;
+  background: #0a111d;
+  padding: 0.6rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+@media (max-width: 980px) {
+  .layout {
+    grid-template-columns: 1fr;
+    padding: 1rem;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(2, minmax(120px, 1fr));
+  }
+}
