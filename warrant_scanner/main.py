@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import logging
 import time
+from math import floor
 
 import pandas as pd
 
@@ -16,6 +17,148 @@ from warrant_scanner.util.fx import FxProvider
 from warrant_scanner.util.logging_utils import setup_logging
 
 logger = logging.getLogger(__name__)
+
+MAX_TOTAL_SCORE = 115
+MAX_ASSET_SCORE = 12
+
+
+def _fmt_num(value: float | None, digits: int = 2) -> str:
+    if value is None or pd.isna(value):
+        return "n/a"
+    return f"{float(value):.{digits}f}"
+
+
+def _safe_float(value: object, fallback: float = 0.0) -> float:
+    if value is None or pd.isna(value):
+        return fallback
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _build_stakeholder_info(row: pd.Series) -> str:
+    reasons: list[str] = []
+    if _safe_float(row.get("spread_pct")) <= 0.8:
+        reasons.append("enger Spread für saubere Ausführung")
+    if _safe_float(row.get("theta_pct_per_day")) <= 5:
+        reasons.append("geringer Zeitwertverlust")
+    if abs(_safe_float(row.get("move_needed_pct"))) <= 3:
+        reasons.append("Break-even mit kleiner Bewegung erreichbar")
+
+    if not reasons:
+        reasons.append("ausgewogenes Chancen/Risiko-Profil")
+
+    return (
+        f"Fokus auf {row['ticker']} mit WKN {row['wkn']} "
+        f"({', '.join(reasons)})."
+    )
+
+
+def _print_console_summary(df: pd.DataFrame, option_type: str, budget_eur: float = 200.0) -> None:
+    if df.empty:
+        return
+
+    is_call = option_type.lower() == "call"
+    top = df.iloc[0]
+
+    asset_close = _safe_float(top.get("asset_close"))
+    strike = _safe_float(top.get("basispreis"))
+    entry = _safe_float(top.get("mid"))
+    if entry <= 0:
+        entry = _safe_float(top.get("ask"))
+
+    spread_pct = _safe_float(top.get("spread_pct"))
+    omega = _safe_float(top.get("omega"))
+    leverage = _safe_float(top.get("hebel"))
+    impl_vol = _safe_float(top.get("impl_vola"))
+    aufgeld = _safe_float(top.get("aufgeld_pct"))
+    theta_abs = _safe_float(top.get("theta_per_day"))
+    theta_pct = _safe_float(top.get("theta_pct_per_day"))
+    move_needed = _safe_float(top.get("move_needed_pct"))
+    intrinsic = _safe_float(top.get("intrinsic_value"))
+    extrinsic = _safe_float(top.get("extrinsic_value"))
+    extrinsic_pct = _safe_float(top.get("extrinsic_pct"))
+    breakeven = top.get("breakeven")
+    days = int(_safe_float(top.get("days_to_maturity"), 0))
+
+    strike_dev = abs(strike - asset_close) / asset_close * 100 if asset_close > 0 else 0.0
+    pieces = floor(budget_eur / entry) if entry > 0 else 0
+    cost = pieces * entry
+    rest = budget_eur - cost
+    stop = entry * 0.9
+    risk = pieces * (entry - stop)
+
+    ratio = _safe_float(top.get("bezugsverhaeltnis"), 1.0) or 1.0
+
+    def _pl(move_pct: float) -> float:
+        if asset_close <= 0:
+            return 0.0
+        scenario_close = asset_close * (1 + move_pct / 100)
+        if is_call:
+            scenario_intrinsic = max(0.0, scenario_close - strike) * ratio
+        else:
+            scenario_intrinsic = max(0.0, strike - scenario_close) * ratio
+        return scenario_intrinsic - entry
+
+    scenario_1 = move_needed
+    scenario_2 = move_needed + 2.0
+    scenario_3 = move_needed + 5.0
+
+    print("─" * 76)
+    print(f"   Gesamt-Score: {int(_safe_float(top.get('total_score'))):d}/{MAX_TOTAL_SCORE} ⭐")
+    print(
+        f"   Strike: {_fmt_num(strike, 1)} | Kurs: {_fmt_num(asset_close, 3)} EUR | "
+        f"Abweichung: {_fmt_num(strike_dev, 1)}%"
+    )
+    print(
+        f"   Omega: {_fmt_num(omega, 1)} | Hebel: {_fmt_num(leverage, 1)} | "
+        f"Spread: {_fmt_num(spread_pct, 2)}%"
+    )
+    print(
+        f"   Laufzeit: {days} Tage | Impl.Vola: {_fmt_num(impl_vol, 1)}% | "
+        f"Aufgeld: {_fmt_num(aufgeld, 1)}%"
+    )
+    print(f"   Zeitwertverlust: {_fmt_num(theta_abs, 4)} EUR/Tag ({_fmt_num(theta_pct, 1)}%/Tag)")
+    print(
+        f"   Break-Even: {_fmt_num(_safe_float(breakeven), 2)} EUR "
+        f"(benötigt {move_needed:+.1f}% Bewegung)"
+    )
+    print(
+        f"   Innerer Wert: {_fmt_num(intrinsic, 3)} EUR | "
+        f"Zeitwert: {_fmt_num(extrinsic, 3)} EUR ({_fmt_num(extrinsic_pct, 0)}%)"
+    )
+    print(
+        f"   Asset-Score: {int(_safe_float(top.get('asset_score'))):d}/{MAX_ASSET_SCORE} | "
+        f"Emittent: {top.get('emittent', 'n/a')}"
+    )
+    print(
+        f"   ├─ Spread-Score: {int(_safe_float(top.get('spread_score'))):d}/25 | "
+        f"Omega-Score: {int(_safe_float(top.get('omega_score'))):d}/25"
+    )
+    print(
+        f"   ├─ Strike-Score: {int(_safe_float(top.get('strike_score'))):d}/20 | "
+        f"Theta-Score: {int(_safe_float(top.get('theta_score'))):d}/15"
+    )
+    print(
+        f"   ├─ Vola-Score: {int(_safe_float(top.get('vola_score'))):d}/10 | "
+        f"Aufgeld-Score: {int(_safe_float(top.get('aufgeld_score'))):d}/5"
+    )
+    print(
+        f"   ├─ Break-Even-Score: {int(_safe_float(top.get('breakeven_score'))):d}/10 | "
+        f"Leverage-Score: {int(_safe_float(top.get('leverage_score'))):d}/5"
+    )
+    print(f"   Stakeholder-Info: {_build_stakeholder_info(top)}")
+    print(
+        "   P/L-Simulation (vereinfacht, nur innerer Wert): "
+        f"{scenario_1:+.1f}% -> { _pl(scenario_1):+.3f} EUR | "
+        f"{scenario_2:+.1f}% -> { _pl(scenario_2):+.3f} EUR | "
+        f"{scenario_3:+.1f}% -> { _pl(scenario_3):+.3f} EUR"
+    )
+    print(
+        f"   200€-Setup (Stop 10%): Stück {pieces} | Entry {entry:.3f}€ | "
+        f"Stop {stop:.3f}€ | Kosten {cost:.2f}€ | Rest {rest:.2f}€ | Risiko {risk:.2f}€"
+    )
 
 
 def get_tickers_dynamically() -> list[str]:
@@ -121,6 +264,8 @@ def main() -> None:
     if df.empty:
         logger.warning("No results")
         return
+
+    _print_console_summary(df, option_type=args.option_type)
 
     df.to_csv(args.out, index=False, encoding="utf-8-sig")
     logger.info("Exported: %s (%d rows)", args.out, len(df))
