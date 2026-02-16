@@ -161,6 +161,92 @@ def _print_console_summary(df: pd.DataFrame, option_type: str, budget_eur: float
     )
 
 
+def _print_asset_screening(asset_rows: list[dict[str, object]], min_asset_score: int) -> None:
+    print("\n📊 SCHRITT 1: Analysiere Basiswerte...\n")
+
+    if not asset_rows:
+        print("⚠️ Keine Basiswerte geprüft.")
+        return
+
+    for row in asset_rows:
+        ticker = str(row["ticker"])
+        if bool(row["has_data"]):
+            score = int(_safe_float(row["score"]))
+            os_ok = "✅" if bool(row["os_ok"]) else "❌"
+            print(f"  Prüfe {ticker}... Score: {score} | OS_OK: {os_ok}")
+        else:
+            print(f"  Prüfe {ticker}... ❌ Keine Daten")
+
+    qualified = [
+        r for r in asset_rows if bool(r["has_data"]) and bool(r["os_ok"]) and int(_safe_float(r["score"])) >= min_asset_score
+    ]
+
+    if not qualified:
+        print("\n❌ Keine qualifizierten Basiswerte gefunden.")
+        return
+
+    df = pd.DataFrame(qualified).sort_values(["score", "ticker"], ascending=[False, True])
+    display_df = pd.DataFrame(
+        {
+            "Ticker": df["ticker"],
+            "Score": df["score"].astype(int),
+            "Close": df["close"].map(lambda x: float(x) if x is not None else float("nan")),
+            "ATR_%": df["atr_pct"].map(lambda x: _safe_float(x) * 100),
+            "Long_Strike": df["long_strike"],
+            "Short_Strike": df["short_strike"],
+        }
+    )
+
+    print(f"\n✅ {len(display_df)} qualifizierte Basiswerte gefunden:\n")
+    print(
+        display_df.to_string(
+            index=False,
+            formatters={
+                "Score": lambda x: f"{int(x):d}",
+                "Close": lambda x: _fmt_num(x, 2),
+                "ATR_%": lambda x: _fmt_num(x, 2),
+                "Long_Strike": lambda x: _fmt_num(x, 2),
+                "Short_Strike": lambda x: _fmt_num(x, 2),
+            },
+        )
+    )
+
+
+def _print_top_options(df: pd.DataFrame, top_n: int = 3) -> None:
+    if df.empty:
+        return
+
+    top = df.head(top_n).copy()
+    if top.empty:
+        return
+
+    print(f"\n🏁 Top {len(top)} Optionsscheine (gesamt):\n")
+    print(
+        top[
+            [
+                "ticker",
+                "wkn",
+                "total_score",
+                "mid",
+                "spread_pct",
+                "hebel",
+                "omega",
+                "laufzeit",
+                "emittent",
+            ]
+        ].to_string(
+            index=False,
+            formatters={
+                "total_score": lambda x: f"{int(_safe_float(x)):d}",
+                "mid": lambda x: _fmt_num(x, 3),
+                "spread_pct": lambda x: _fmt_num(x, 2),
+                "hebel": lambda x: _fmt_num(x, 2),
+                "omega": lambda x: _fmt_num(x, 2),
+            },
+        )
+    )
+
+
 def get_tickers_dynamically() -> list[str]:
     # Default list lives in the package to avoid legacy-script import cycles.
     from warrant_scanner.tickers import get_default_tickers
@@ -172,11 +258,39 @@ def run(config: ScannerConfig, tickers: list[str], option_type: str = "call", de
     is_call = option_type.lower() == "call"
 
     assets = []
+    asset_rows: list[dict[str, object]] = []
     for t in tickers:
         logger.info("Checking asset %s", t)
         snap = check_asset(t, config)
         if snap:
             assets.append(snap)
+            asset_rows.append(
+                {
+                    "ticker": snap.ticker,
+                    "has_data": True,
+                    "score": snap.score,
+                    "os_ok": snap.os_ok,
+                    "close": snap.close,
+                    "atr_pct": snap.atr_pct,
+                    "long_strike": snap.long_strike,
+                    "short_strike": snap.short_strike,
+                }
+            )
+        else:
+            asset_rows.append(
+                {
+                    "ticker": t,
+                    "has_data": False,
+                    "score": None,
+                    "os_ok": False,
+                    "close": None,
+                    "atr_pct": None,
+                    "long_strike": None,
+                    "short_strike": None,
+                }
+            )
+
+    _print_asset_screening(asset_rows, config.min_asset_score)
 
     df_assets = pd.DataFrame([a.__dict__ for a in assets])
     if df_assets.empty:
@@ -266,6 +380,7 @@ def main() -> None:
         return
 
     _print_console_summary(df, option_type=args.option_type)
+    _print_top_options(df, top_n=3)
 
     df.to_csv(args.out, index=False, encoding="utf-8-sig")
     logger.info("Exported: %s (%d rows)", args.out, len(df))
