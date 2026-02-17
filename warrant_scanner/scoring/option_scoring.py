@@ -70,11 +70,12 @@ def _score_strike(distance_pct: float) -> int:
 
 
 def _score_theta(theta_pct: float) -> int:
-    if theta_pct <= 0.5:
+    # theta_pct is already in percent-per-day (e.g. 4.2 == 4.2%)
+    if theta_pct <= 5.0:
         return 15
-    if theta_pct <= 1.0:
+    if theta_pct <= 7.0:
         return 12
-    if theta_pct <= 2.0:
+    if theta_pct <= 10.0:
         return 8
     return 3
 
