@@ -18,13 +18,34 @@ Der Ablauf besteht aus drei Teilen:
 
 **Abhängigkeiten installieren:**
 ```bash
-pip install yfinance pandas numpy requests beautifulsoup4
+pip install yfinance pandas numpy requests beautifulsoup4 pyyaml
 ```
 
 **Starten:**
 ```bash
 python warrants_searcher_v6_fixed_3.py
 ```
+
+### Konfiguration
+
+Das Skript verwendet eine `config.yaml` Datei für alle tunable Parameter:
+
+```bash
+# Mit Standard-Config starten
+python warrants_searcher_v6_fixed_3.py
+
+# Mit eigener Config starten
+python warrants_searcher_v6_fixed_3.py --config /pfad/zur/config.yaml
+```
+
+Die Config-Datei ermöglicht Anpassung von:
+- Yahoo Finance Parametern (Period, Interval)
+- Indikator-Fenstern (SMA, RSI, ATR)
+- Scoring-Schwellenwerten und Gewichtungen
+- Forecast/Scraper Timeouts
+- CLI Defaults
+
+Siehe `config.yaml` für alle Optionen.
 
 Das Skript:
 - analysiert eine feste Ticker‑Liste,
@@ -212,6 +233,7 @@ Beispiel für `crontab` (3x pro Tag):
 ## Projektdateien
 
 - **`warrants_searcher_v6_fixed_3.py`** → Komplettes Skript (Basiswert‑Check, Onvista‑Scraping, Scoring)
+- **`config.yaml`** → Konfigurationsdatei (Scoring, Indikatoren, Timeouts)
 - **`top_optionsscheine_ing.csv`** → Output der letzten Analyse (wird beim Lauf überschrieben)
 
 ## Trading-Logbuch Dashboard (neu)
