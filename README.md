@@ -64,7 +64,20 @@ Jeder Ticker bekommt einen **Score** und ein Flag `OS_OK`. Nur wenn der Basiswer
 
 **Punkte:** +4 bei sauberem Aufwärtstrend.
 
-### 2) Momentum & RSI‑Bestätigung
+### 2) EMA-Pullback
+**Kriterium:**
+- Trend intakt (Close > SMA50)
+- Preis nahe am SMA20 (±3%)
+
+**Punkte:** +2 bei validem Pullback.
+
+### 3) Relative Strength vs SPY
+**Kriterium:**
+- 20-Tage Return der Aktie vs. SPY
+- Outperformance >2%: +2 Punkte
+- Outperformance >0%: +1 Punkt
+
+### 4) Momentum & RSI‑Bestätigung
 **Kriterium:**
 - Kurs liegt über dem Schlusskurs von vor 10 Tagen
 - RSI zwischen 50 und 70 (Trend bestätigt, aber nicht überkauft)
@@ -73,7 +86,7 @@ Jeder Ticker bekommt einen **Score** und ein Flag `OS_OK`. Nur wenn der Basiswer
 - +3 bei Momentum **und** RSI im Idealbereich
 - +2 bei Momentum, aber RSI‑Warnung
 
-### 3) Volatilität (ATR & Recent Vol)
+### 5) Volatilität (ATR & Recent Vol)
 **Kriterium:**
 - ATR‑Prozent (`ATR / Close`) zwischen **2% und 5%**
 - „Recent Volatility“ (Rolling STD) möglichst aktiv
@@ -83,13 +96,13 @@ Jeder Ticker bekommt einen **Score** und ein Flag `OS_OK`. Nur wenn der Basiswer
 - +2 bei idealer ATR, aber geringe Recent Vol
 - +1 bei sehr hoher Volatilität
 
-### 4) Volumen
+### 6) Volumen
 **Kriterium:**
 - aktuelles Volumen > 20‑Tage‑Durchschnitt
 
 **Punkte:** +2 wenn Volumen über Durchschnitt.
 
-### 5) Seitwärts‑Filter (Theta‑Gefahr)
+### 7) Seitwärts‑Filter (Theta‑Gefahr)
 **Kriterium:**
 - 15‑Tage‑Range (High‑Low) relativ zum Kurs
 - wenn Range < 2.5% → **Abzug**
@@ -98,13 +111,13 @@ Jeder Ticker bekommt einen **Score** und ein Flag `OS_OK`. Nur wenn der Basiswer
 - −5 bei Seitwärtsmarkt
 - +0 wenn genug Bewegung
 
-### 6) „Optionsschein‑tauglich“ (OS_OK)
+### 7) „Optionsschein‑tauglich“ (OS_OK)
 Ein Basiswert ist **OS_OK**, wenn:
-- Score ≥ 7
+- Score ≥ 14
 - ATR‑Prozent ≥ 2%
 - 15‑Tage‑Range ≥ 2.5%
 
-### 7) Ziel‑Strikes (für Optionsschein‑Score)
+### 9) Ziel‑Strikes (für Optionsschein‑Score)
 Für die spätere Bewertung der Optionsscheine wird ein Ziel‑Strike berechnet:
 - **Long‑Strike:** `Close + 1.5 × ATR(5d)`
 - **Short‑Strike:** `Close − 1.5 × ATR(5d)`
