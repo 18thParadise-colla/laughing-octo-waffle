@@ -99,8 +99,12 @@ def _ticker_to_stockanalysis_symbol(ticker: str) -> Optional[str]:
     return clean.lower()
 
 
-def get_stockanalysis_forecast(ticker: str, timeout: int = 8) -> Dict:
+def get_stockanalysis_forecast(ticker: str, timeout: int = None) -> Dict:
     """Liest Forecast-Daten von stockanalysis.com für ein Ticker-Symbol."""
+    cfg = get_config()
+    fc = cfg["forecast"]
+    timeout = timeout or fc["timeout"]
+
     symbol = _ticker_to_stockanalysis_symbol(ticker)
     if not symbol:
         return {
@@ -115,7 +119,7 @@ def get_stockanalysis_forecast(ticker: str, timeout: int = 8) -> Dict:
     try:
         response = requests.get(url, timeout=timeout, headers={
             "User-Agent": "Mozilla/5.0",
-            "Accept-Language": "en-US,en;q=0.9"
+            "Language": "en-US,en;q=0.9"
         })
         if response.status_code != 200:
             return {
@@ -149,9 +153,9 @@ def get_stockanalysis_forecast(ticker: str, timeout: int = 8) -> Dict:
             forecast_score -= 1
 
         if upside is not None:
-            if upside >= 15:
+            if upside >= fc["upside_strong"]:
                 forecast_score += 2
-            elif upside >= 5:
+            elif upside >= fc["upside_moderate"]:
                 forecast_score += 1
             elif upside < 0:
                 forecast_score -= 2
