@@ -19,6 +19,11 @@ scoring:
   pullback:
     tolerance_pct: 0.03
     score: 2
+  relative_strength:
+    benchmark: "SPY"
+    lookback_days: 20
+    strong_outperformance: 2
+    moderate_outperformance: 0
   momentum:
     positive_rsi_confirmed: 3
     positive_only: 2
