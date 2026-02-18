@@ -23,7 +23,9 @@ def load_config(config_path: Optional[str] = None) -> dict:
         "yahoo": {"period": "6mo", "interval": "1d", "min_data_points": 80},
         "indicators": {"sma_short": 20, "sma_long": 50, "rsi_window": 14, "atr_window": 14, "volatility_window": 14, "range_lookback": 15},
         "scoring": {
-            "trend": {"uptrend_bullish": 4}, "momentum": {"positive_rsi_confirmed": 3, "positive_only": 2},
+            "trend": {"uptrend_bullish": 4},
+            "pullback": {"tolerance_pct": 0.03, "score": 2},
+            "momentum": {"positive_rsi_confirmed": 3, "positive_only": 2},
             "atr": {"ideal_volatile_confirmed": 3, "ideal_volatile_only": 2, "high_volatile": 1},
             "volume": {"above_average": 2}, "sideways": {"penalty": -5},
             "min_score": 7, "atr_min_pct": 0.02, "atr_max_pct": 0.05, "sideways_max_pct": 0.025, "rsi_min": 50, "rsi_max": 70,
@@ -225,6 +227,20 @@ def check_basiswert(ticker, period=None, interval=None):
         reasons.append("✔ Aufwärtstrend (Close > SMA20 > SMA50)")
     else:
         reasons.append("✘ Kein sauberer Aufwärtstrend")
+
+    # EMA-Pullback: Preis nahe am SMA20 nach Rücksetzer
+    if close > sma50:  # Trend intakt
+        pullback_tolerance = sc.get("pullback", {}).get("tolerance_pct", 0.03)
+        pullback_score = sc.get("pullback", {}).get("score", 2)
+        pullback_distance = (sma20 - close) / close
+
+        if abs(pullback_distance) <= pullback_tolerance:
+            score += pullback_score
+            reasons.append(f"✔ EMA-Pullback: Close nahe SMA20 ({pullback_distance*100:.1f}%)")
+        elif close < sma20:
+            reasons.append("⚠ Unter SMA20 - kein Pullback")
+        else:
+            reasons.append("ℹ️ Kein EMA-Pullback")
 
     # Momentum (mit RSI Bestätigung)
     if close > float(prev10["Close"]) and sc["rsi_min"] < rsi < sc["rsi_max"]:
