@@ -13,6 +13,82 @@ import re
 from typing import List, Dict, Optional
 from difflib import SequenceMatcher
 from email.message import EmailMessage
+import yaml
+from pathlib import Path
+
+
+def load_config(config_path: Optional[str] = None) -> dict:
+    """Load configuration from YAML file with fallback to defaults."""
+    defaults = {
+        "yahoo": {
+            "period": "6mo",
+            "interval": "1d",
+            "min_data_points": 80,
+        },
+        "indicators": {
+            "sma_short": 20,
+            "sma_long": 50,
+            "rsi_window": 14,
+            "atr_window": 14,
+            "volatility_window": 14,
+            "range_lookback": 15,
+        },
+        "scoring": {
+            "trend": {"uptrend_bullish": 4},
+            "momentum": {"positive_rsi_confirmed": 3, "positive_only": 2},
+            "atr": {"ideal_volatile_confirmed": 3, "ideal_volatile_only": 2, "high_volatile": 1},
+            "volume": {"above_average": 2},
+            "sideways": {"penalty": -5},
+            "min_score": 7,
+            "atr_min_pct": 0.02,
+            "atr_max_pct": 0.05,
+            "sideways_max_pct": 0.025,
+            "rsi_min": 50,
+            "rsi_max": 70,
+        },
+        "forecast": {
+            "timeout": 8,
+            "upside_strong": 15,
+            "upside_moderate": 5,
+        },
+        "scraper": {
+            "delay": 2.0,
+            "timeout": 15,
+            "retry_delay": 1,
+            "max_retries": 3,
+        },
+        "cli": {
+            "default_tickers": ["AAPL", "MSFT", "GOOGL"],
+            "output_format": "table",
+        },
+    }
+
+    if config_path is None:
+        config_path = Path(__file__).parent / "config.yaml"
+
+    if os.path.exists(config_path):
+        with open(config_path, "r") as f:
+            user_config = yaml.safe_load(f) or {}
+        # Merge with defaults
+        for section, values in user_config.items():
+            if section in defaults:
+                defaults[section].update(values)
+        return defaults
+
+    return defaults
+
+
+# Global config instance
+_config = None
+
+
+def get_config() -> dict:
+    """Get the global config instance."""
+    global _config
+    if _config is None:
+        _config = load_config()
+    return _config
+
 
 # ================================
 # TEIL 1: BASISWERT-CHECKER
@@ -58,8 +134,12 @@ def _ticker_to_stockanalysis_symbol(ticker: str) -> Optional[str]:
     return clean.lower()
 
 
-def get_stockanalysis_forecast(ticker: str, timeout: int = 8) -> Dict:
+def get_stockanalysis_forecast(ticker: str, timeout: int = None) -> Dict:
     """Liest Forecast-Daten von stockanalysis.com für ein Ticker-Symbol."""
+    cfg = get_config()
+    fc = cfg["forecast"]
+    timeout = timeout or fc["timeout"]
+
     symbol = _ticker_to_stockanalysis_symbol(ticker)
     if not symbol:
         return {
@@ -108,9 +188,9 @@ def get_stockanalysis_forecast(ticker: str, timeout: int = 8) -> Dict:
             forecast_score -= 1
 
         if upside is not None:
-            if upside >= 15:
+            if upside >= fc["upside_strong"]:
                 forecast_score += 2
-            elif upside >= 5:
+            elif upside >= fc["upside_moderate"]:
                 forecast_score += 1
             elif upside < 0:
                 forecast_score -= 2
@@ -131,23 +211,32 @@ def get_stockanalysis_forecast(ticker: str, timeout: int = 8) -> Dict:
             "Forecast_URL": url,
         }
 
-def check_basiswert(ticker, period="6mo", interval="1d"):
+def check_basiswert(ticker, period=None, interval=None):
     """Prüfe einzelnen Basiswert"""
+    cfg = get_config()
+
+    period = period or cfg["yahoo"]["period"]
+    interval = interval or cfg["yahoo"]["interval"]
+    min_data = cfg["yahoo"]["min_data_points"]
+
+    ind = cfg["indicators"]
+    sc = cfg["scoring"]
+
     df = yf.download(ticker, period=period, interval=interval, progress=False)
 
-    if df.empty or len(df) < 80:
+    if df.empty or len(df) < min_data:
         return None
 
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
 
     df = df.dropna()
-    df["SMA20"] = df["Close"].rolling(20).mean()
-    df["SMA50"] = df["Close"].rolling(50).mean()
-    df["ATR"] = calculate_atr(df)
-    df["RSI"] = calculate_rsi(df)
-    df["Vol_Mean"] = df["Volume"].rolling(20).mean()
-    df["Recent_Vol"] = calculate_recent_volatility(df)
+    df["SMA20"] = df["Close"].rolling(ind["sma_short"]).mean()
+    df["SMA50"] = df["Close"].rolling(ind["sma_long"]).mean()
+    df["ATR"] = calculate_atr(df, window=ind["atr_window"])
+    df["RSI"] = calculate_rsi(df, window=ind["rsi_window"])
+    df["Vol_Mean"] = df["Volume"].rolling(ind["sma_short"]).mean()
+    df["Recent_Vol"] = calculate_recent_volatility(df, window=ind["volatility_window"])
     df = df.dropna()
 
     latest = df.iloc[-1]
@@ -173,49 +262,49 @@ def check_basiswert(ticker, period="6mo", interval="1d"):
 
     # Trend
     if close > sma20 > sma50:
-        score += 4
+        score += sc["trend"]["uptrend_bullish"]
         reasons.append("✔ Aufwärtstrend (Close > SMA20 > SMA50)")
     else:
         reasons.append("✘ Kein sauberer Aufwärtstrend")
 
     # Momentum (mit RSI Bestätigung)
-    if close > float(prev10["Close"]) and 50 < rsi < 70:
-        score += 3
+    if close > float(prev10["Close"]) and sc["rsi_min"] < rsi < sc["rsi_max"]:
+        score += sc["momentum"]["positive_rsi_confirmed"]
         reasons.append(f"✔ Positives Momentum + RSI({rsi:.0f}) bestätigt")
     elif close > float(prev10["Close"]):
-        score += 2
+        score += sc["momentum"]["positive_only"]
         reasons.append(f"⚠ Momentum ok aber RSI({rsi:.0f}) warnt")
     else:
         reasons.append("✘ Momentum nicht bestätigt")
 
     # ATR (durchschnittliche vs recent Volatilität)
-    if 0.02 <= atr_pct <= 0.05 and recent_vol >= 0.8:
-        score += 3
+    if sc["atr_min_pct"] <= atr_pct <= sc["atr_max_pct"] and recent_vol >= 0.8:
+        score += sc["atr"]["ideal_volatile_confirmed"]
         reasons.append(f"✔ ATR ideal + Recent Vol aktiv ({recent_vol:.1f}%)")
-    elif 0.02 <= atr_pct <= 0.05:
-        score += 2
+    elif sc["atr_min_pct"] <= atr_pct <= sc["atr_max_pct"]:
+        score += sc["atr"]["ideal_volatile_only"]
         reasons.append(f"⚠ ATR ok aber Recent Vol niedrig ({recent_vol:.1f}%)")
-    elif atr_pct > 0.05:
-        score += 1
+    elif atr_pct > sc["atr_max_pct"]:
+        score += sc["atr"]["high_volatile"]
         reasons.append(f"⚠ Sehr hohe Volatilität ({atr_pct*100:.2f}%)")
     else:
         reasons.append(f"✘ Zu wenig Volatilität ({atr_pct*100:.2f}%)")
 
     # Volumen
     if volume > vol_mean:
-        score += 2
+        score += sc["volume"]["above_average"]
         reasons.append("✔ Volumen über Durchschnitt")
     else:
         reasons.append("✘ Volumen unter Durchschnitt")
 
     # Seitwärtsfilter
     range_15 = (
-        df["High"].rolling(15).max()
-        - df["Low"].rolling(15).min()
+        df["High"].rolling(ind["range_lookback"]).max()
+        - df["Low"].rolling(ind["range_lookback"]).min()
     ).iloc[-1] / close
 
-    if range_15 < 0.025:
-        score -= 5
+    if range_15 < sc["sideways_max_pct"]:
+        score += sc["sideways"]["penalty"]
         reasons.append("✘ Seitwärtsmarkt (Theta-Gefahr)")
     else:
         reasons.append("✔ Genug Range, kein Seitwärtsmarkt")
@@ -237,9 +326,9 @@ def check_basiswert(ticker, period="6mo", interval="1d"):
 
     # OS-OK
     os_ok = (
-        score >= 7 and
-        atr_pct >= 0.02 and
-        range_15 >= 0.025
+        score >= sc["min_score"] and
+        atr_pct >= sc["atr_min_pct"] and
+        range_15 >= sc["sideways_max_pct"]
     )
 
     if os_ok:
@@ -276,19 +365,22 @@ class INGOptionsFinder:
     Fokus: ING als Broker, umfassende Bewertung
     """
     
-    def __init__(self, delay: float = 2.0):
+    def __init__(self, delay: float = None):
+        cfg = get_config()
+        scraper = cfg["scraper"]
+
         self.base_url = "https://www.onvista.de/derivate/Optionsscheine"
-        self.delay = delay
+        self.delay = delay or scraper["delay"]
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Language': 'de-DE,de;q=0.9,en;q=0.8'
         })
-        
-        # Retry-Konfiguration
-        self.max_retries = 3
-        self.retry_delay = 1  # Sekunden
+
+        # Retry-Konfiguration from config
+        self.max_retries = scraper["max_retries"]
+        self.retry_delay = scraper["retry_delay"]
         self.search_cache = {}  # Cache für erfolgreiche Suchen
         self.details_cache = {}  # Cache für Optionsschein-Details
         self.mapping_cache_file = "onvista_mapping.json"
@@ -2098,7 +2190,17 @@ if __name__ == "__main__":
         action="store_true",
         help="Stoppt nach dem Basiswert-Check (ohne Optionsschein-Ausgabe)."
     )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to config.yaml file (default: config.yaml in script directory)."
+    )
     args = parser.parse_args()
+
+    # Load config (before any analysis)
+    global _config
+    _config = load_config(args.config)
     
     # ===== HOLE TICKER =====
     TICKERS = get_tickers_dynamically()

@@ -1,0 +1,62 @@
+# Warrants Searcher Configuration
+# Load with: load_config()
+
+# === YAHOO FINANCE PARAMETERS ===
+yahoo:
+  period: "6mo"
+  interval: "1d"
+  min_data_points: 80
+
+# === TECHNICAL INDICATORS ===
+indicators:
+  sma_short: 20
+  sma_long: 50
+  rsi_window: 14
+  atr_window: 14
+  volatility_window: 14
+  range_lookback: 15
+
+# === SCORING WEIGHTS ===
+scoring:
+  trend:
+    uptrend_bullish: 4
+  momentum:
+    positive_rsi_confirmed: 3
+    positive_only: 2
+  atr:
+    ideal_volatile_confirmed: 3
+    ideal_volatile_only: 2
+    high_volatile: 1
+  volume:
+    above_average: 2
+  sideways:
+    penalty: -5
+
+  # Filter thresholds
+  min_score: 7
+  atr_min_pct: 0.02
+  atr_max_pct: 0.05
+  sideways_max_pct: 0.025
+  rsi_min: 50
+  rsi_max: 70
+
+# === FORECAST ANALYSTEN ===
+forecast:
+  timeout: 8
+  upside_strong: 15
+  upside_moderate: 5
+
+# === SCRAPING / ONVISTA ===
+scraper:
+  delay: 2.0
+  timeout: 15
+  retry_delay: 1
+  max_retries: 3
+
+# === CLI DEFAULTS ===
+cli:
+  default_tickers:
+    - "AAPL"
+    - "MSFT"
+    - "GOOGL"
+  output_format: "table"
