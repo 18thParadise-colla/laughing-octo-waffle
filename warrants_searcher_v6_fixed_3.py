@@ -29,11 +29,11 @@ def load_config(config_path: Optional[str] = None) -> dict:
             "momentum": {"positive_rsi_confirmed": 3, "positive_only": 2},
             "atr": {"ideal_volatile_confirmed": 3, "ideal_volatile_only": 2, "high_volatile": 1},
             "volume": {"above_average": 2}, "sideways": {"penalty": -5},
-            "min_score": 7, "atr_min_pct": 0.02, "atr_max_pct": 0.05, "sideways_max_pct": 0.025, "rsi_min": 50, "rsi_max": 70,
+            "os_ok_min_score": 7, "atr_min_pct": 0.02, "atr_max_pct": 0.05, "sideways_max_pct": 0.025, "rsi_min": 50, "rsi_max": 70,
         },
         "forecast": {"timeout": 8, "upside_strong": 15, "upside_moderate": 5},
         "scraper": {"delay": 2.0, "timeout": 15, "retry_delay": 1, "max_retries": 3},
-        "cli": {"default_tickers": ["AAPL", "MSFT", "GOOGL"], "output_format": "table"},
+        "cli": {"default_tickers": ["AAPL", "MSFT", "GOOGL"], "output_format": "table", "min_score": 12},
     }
     if config_path is None:
         config_path = Path(__file__).parent / "config.yaml"
@@ -336,7 +336,7 @@ def check_basiswert(ticker, period=None, interval=None):
 
     # OS-OK
     os_ok = (
-        score >= sc["min_score"] and
+        score >= sc["os_ok_min_score"] and
         atr_pct >= sc["atr_min_pct"] and
         range_15 >= sc["sideways_max_pct"]
     )
@@ -2221,9 +2221,11 @@ if __name__ == "__main__":
     print("=" * 80)
     
     # ===== FÜHRE ANALYSE AUS =====
+    cfg = get_config()
+    cli_cfg = cfg.get("cli", {})
     df_results = run_complete_analysis(
         TICKERS,
-        min_score=12,
+        min_score=cli_cfg.get("min_score", 12),
         basiswert_only=args.basiswert
     )
     

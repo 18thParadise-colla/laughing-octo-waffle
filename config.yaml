@@ -35,7 +35,7 @@ scoring:
     above_average: 2
   sideways:
     penalty: -5
-  min_score: 7
+  os_ok_min_score: 7  # Min score for basiswert to be OS_OK
   atr_min_pct: 0.02
   atr_max_pct: 0.05
   sideways_max_pct: 0.025
@@ -59,3 +59,4 @@ cli:
     - "MSFT"
     - "GOOGL"
   output_format: "table"
+  min_score: 12  # Min score for results display
