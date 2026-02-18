@@ -25,6 +25,7 @@ def load_config(config_path: Optional[str] = None) -> dict:
         "scoring": {
             "trend": {"uptrend_bullish": 4},
             "pullback": {"tolerance_pct": 0.03, "score": 2},
+            "relative_strength": {"benchmark": "SPY", "lookback_days": 20, "strong_outperformance": 2, "moderate_outperformance": 0},
             "momentum": {"positive_rsi_confirmed": 3, "positive_only": 2},
             "atr": {"ideal_volatile_confirmed": 3, "ideal_volatile_only": 2, "high_volatile": 1},
             "volume": {"above_average": 2}, "sideways": {"penalty": -5},
@@ -241,6 +242,40 @@ def check_basiswert(ticker, period=None, interval=None):
             reasons.append("⚠ Unter SMA20 - kein Pullback")
         else:
             reasons.append("ℹ️ Kein EMA-Pullback")
+
+    # Relative Strength vs SPY
+    rs = sc.get("relative_strength", {})
+    if rs:
+        try:
+            rs_config = get_config()
+            benchmark = rs.get("benchmark", "SPY")
+            lookback = rs.get("lookback_days", 20)
+
+            # SPY Daten laden
+            spy = yf.download(benchmark, period="1mo", interval="1d", progress=False)
+            if not spy.empty and len(spy) >= lookback:
+                spy_close = float(spy["Close"].iloc[-1])
+                spy_close_ago = float(spy["Close"].iloc[-lookback]) if len(spy) >= lookback else float(spy["Close"].iloc[0])
+                spy_return = (spy_close / spy_close_ago) - 1
+
+                # Stock Return
+                close_ago = float(df["Close"].iloc[-lookback]) if len(df) >= lookback else float(df["Close"].iloc[0])
+                stock_return = (close / close_ago) - 1
+
+                rel_strength = stock_return - spy_return
+                strong_thresh = rs.get("strong_outperformance", 2) / 100
+                moderate_thresh = rs.get("moderate_outperformance", 0) / 100
+
+                if rel_strength >= strong_thresh:
+                    score += 2
+                    reasons.append(f"✔ Relative Strength: +{rel_strength*100:.1f}% vs {benchmark}")
+                elif rel_strength >= moderate_thresh:
+                    score += 1
+                    reasons.append(f"⚠ Rel. Strength: +{rel_strength*100:.1f}% vs {benchmark} (mäßig)")
+                else:
+                    reasons.append(f"✘ Relative Strength: {rel_strength*100:.1f}% vs {benchmark}")
+        except Exception:
+            reasons.append("ℹ️ Relative Strength: keine SPY-Daten verfügbar")
 
     # Momentum (mit RSI Bestätigung)
     if close > float(prev10["Close"]) and sc["rsi_min"] < rsi < sc["rsi_max"]:
