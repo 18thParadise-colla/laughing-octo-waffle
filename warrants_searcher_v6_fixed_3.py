@@ -28,7 +28,7 @@ def load_config(config_path: Optional[str] = None) -> dict:
             "relative_strength": {"benchmark": "SPY", "lookback_days": 20, "strong_outperformance": 2, "moderate_outperformance": 0},
             "momentum": {"positive_rsi_confirmed": 3, "positive_only": 2},
             "atr": {"ideal_volatile_confirmed": 3, "ideal_volatile_only": 2, "high_volatile": 1},
-            "volume": {"above_average": 2}, "sideways": {"penalty": -5},
+            "volume": {"above_average": 2, "increasing_3d": 2}, "sideways": {"penalty": -5},
             "os_ok_min_score": 7, "atr_min_pct": 0.02, "atr_max_pct": 0.05, "sideways_max_pct": 0.025, "rsi_min": 50, "rsi_max": 70,
         },
         "forecast": {"timeout": 8, "upside_strong": 15, "upside_moderate": 5},
@@ -306,6 +306,16 @@ def check_basiswert(ticker, period=None, interval=None):
         reasons.append("✔ Volumen über Durchschnitt")
     else:
         reasons.append("✘ Volumen unter Durchschnitt")
+
+    # Volume-Momentum: steigendes Volumen letzte 3 Tage
+    if len(df) >= 4:
+        vol_increasing = all(
+            df["Volume"].iloc[-(i)] > df["Volume"].iloc[-(i + 1)]
+            for i in range(1, 4)
+        )
+        if vol_increasing:
+            score += sc["volume"]["increasing_3d"]
+            reasons.append("✔ Volumen steigend (letzte 3 Tage)")
 
     # Seitwärtsfilter
     range_15 = (

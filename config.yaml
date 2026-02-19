@@ -33,9 +33,10 @@ scoring:
     high_volatile: 1
   volume:
     above_average: 2
+    increasing_3d: 2
   sideways:
     penalty: -5
-  os_ok_min_score: 7  # Min score for basiswert to be OS_OK
+  os_ok_min_score: 13  # Min score for basiswert to be OS_OK
   atr_min_pct: 0.02
   atr_max_pct: 0.05
   sideways_max_pct: 0.025
@@ -59,4 +60,4 @@ cli:
     - "MSFT"
     - "GOOGL"
   output_format: "table"
-  min_score: 12  # Min score for results display
+  min_score: 13  # Min score for results display
