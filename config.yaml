@@ -34,6 +34,11 @@ scoring:
   volume:
     above_average: 2
     increasing_3d: 2
+  bollinger:
+    window: 20
+    num_std: 2
+    lower_band_touch: 2
+    lower_band_near: 1
   sideways:
     penalty: -5
   os_ok_min_score: 13  # Min score for basiswert to be OS_OK
