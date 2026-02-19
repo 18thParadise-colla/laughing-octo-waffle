@@ -28,7 +28,7 @@ def load_config(config_path: Optional[str] = None) -> dict:
             "relative_strength": {"benchmark": "SPY", "lookback_days": 20, "strong_outperformance": 2, "moderate_outperformance": 0},
             "momentum": {"positive_rsi_confirmed": 3, "positive_only": 2},
             "atr": {"ideal_volatile_confirmed": 3, "ideal_volatile_only": 2, "high_volatile": 1},
-            "volume": {"above_average": 2, "increasing_3d": 2}, "sideways": {"penalty": -5},
+            "volume": {"above_average": 2, "increasing_3d": 2}, "bollinger": {"window": 20, "num_std": 2, "lower_band_touch": 2, "lower_band_near": 1}, "sideways": {"penalty": -5},
             "os_ok_min_score": 7, "atr_min_pct": 0.02, "atr_max_pct": 0.05, "sideways_max_pct": 0.025, "rsi_min": 50, "rsi_max": 70,
         },
         "forecast": {"timeout": 8, "upside_strong": 15, "upside_moderate": 5},
@@ -199,6 +199,15 @@ def check_basiswert(ticker, period=None, interval=None):
     df["RSI"] = calculate_rsi(df, window=ind["rsi_window"])
     df["Vol_Mean"] = df["Volume"].rolling(ind["sma_short"]).mean()
     df["Recent_Vol"] = calculate_recent_volatility(df, window=ind["volatility_window"])
+
+    # Bollinger Bands
+    bb_window = sc.get("bollinger", {}).get("window", 20)
+    bb_num_std = sc.get("bollinger", {}).get("num_std", 2)
+    df["BB_Middle"] = df["Close"].rolling(bb_window).mean()
+    df["BB_Std"] = df["Close"].rolling(bb_window).std()
+    df["BB_Upper"] = df["BB_Middle"] + (bb_num_std * df["BB_Std"])
+    df["BB_Lower"] = df["BB_Middle"] - (bb_num_std * df["BB_Std"])
+
     df = df.dropna()
 
     latest = df.iloc[-1]
@@ -316,6 +325,19 @@ def check_basiswert(ticker, period=None, interval=None):
         if vol_increasing:
             score += sc["volume"]["increasing_3d"]
             reasons.append("✔ Volumen steigend (letzte 3 Tage)")
+
+    # Bollinger Bands: Preis nahe unterem Band = potenzielle Erholung
+    bb_config = sc.get("bollinger", {})
+    bb_lower = float(latest["BB_Lower"])
+    bb_touch_score = bb_config.get("lower_band_touch", 2)
+    bb_near_score = bb_config.get("lower_band_near", 1)
+
+    if close <= bb_lower:
+        score += bb_touch_score
+        reasons.append("✔ Preis am Bollinger Lower Band (Erholungs-Signal)")
+    elif close < bb_lower * 1.01:  # innerhalb 1% vom unteren Band
+        score += bb_near_score
+        reasons.append("✔ Preis nahe Bollinger Lower Band")
 
     # Seitwärtsfilter
     range_15 = (
